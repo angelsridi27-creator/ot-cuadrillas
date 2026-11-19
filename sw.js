@@ -1,0 +1,68 @@
+// Service worker: guarda la app en el teléfono para que abra sin señal.
+// Los datos (OT, marcas) los maneja Firestore con su propia caché sin conexión.
+const VERSION = 'cuadrillas-v1.0.0';
+const APP = [
+  './', './index.html', './manifest.webmanifest', './css/app.css',
+  './js/main.js', './js/db.js', './js/logica.js', './js/pdf.js', './js/config.js',
+  './icons/icono.svg', './icons/icono-180.png', './icons/icono-192.png', './icons/icono-512.png'
+];
+const CDN = [
+  'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js',
+  'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js',
+  'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js',
+  'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm'
+];
+const HOSTS_CDN = ['www.gstatic.com', 'cdn.jsdelivr.net'];
+
+self.addEventListener('install', e => {
+  e.waitUntil((async () => {
+    const c = await caches.open(VERSION);
+    await c.addAll(APP);
+    await Promise.all(CDN.map(u => c.add(u).catch(() => null)));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil((async () => {
+    for (const k of await caches.keys()) if (k !== VERSION) await caches.delete(k);
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+
+  // Páginas: primero la red, si no hay señal la copia guardada
+  if (req.mode === 'navigate') {
+    e.respondWith(fetch(req).then(r => {
+      const copia = r.clone();
+      caches.open(VERSION).then(c => c.put('./index.html', copia));
+      return r;
+    }).catch(() => caches.match('./index.html')));
+    return;
+  }
+
+  // Librerías externas (Firebase, pdf-lib): la copia guardada primero
+  if (HOSTS_CDN.includes(url.hostname)) {
+    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => {
+      if (r.ok) { const copia = r.clone(); caches.open(VERSION).then(c => c.put(req, copia)); }
+      return r;
+    })));
+    return;
+  }
+
+  // Archivos de la app: copia guardada al instante y se actualiza en segundo plano
+  if (url.origin === self.location.origin) {
+    e.respondWith(caches.match(req).then(hit => {
+      const red = fetch(req).then(r => {
+        if (r.ok) { const copia = r.clone(); caches.open(VERSION).then(c => c.put(req, copia)); }
+        return r;
+      }).catch(() => hit);
+      return hit || red;
+    }));
+  }
+  // El resto (Firestore, autenticación) va directo a la red
+});
