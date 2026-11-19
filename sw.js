@@ -1,6 +1,6 @@
 // Service worker: guarda la app en el teléfono para que abra sin señal.
 // Los datos (OT, marcas) los maneja Firestore con su propia caché sin conexión.
-const VERSION = 'cuadrillas-v1.0.0';
+const VERSION = 'cuadrillas-v1.0.1';
 const APP = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/main.js', './js/db.js', './js/logica.js', './js/pdf.js', './js/config.js',
@@ -54,15 +54,23 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Archivos de la app: copia guardada al instante y se actualiza en segundo plano
+  // Archivos de la app: primero la red (así llegan las actualizaciones);
+  // si no hay señal o tarda más de 4 segundos, la copia guardada
   if (url.origin === self.location.origin) {
-    e.respondWith(caches.match(req).then(hit => {
-      const red = fetch(req).then(r => {
+    e.respondWith((async () => {
+      const guardada = await caches.match(req);
+      try {
+        const r = await Promise.race([
+          fetch(req),
+          new Promise((_, no) => setTimeout(() => no(new Error('lento')), guardada ? 4000 : 30000))
+        ]);
         if (r.ok) { const copia = r.clone(); caches.open(VERSION).then(c => c.put(req, copia)); }
         return r;
-      }).catch(() => hit);
-      return hit || red;
-    }));
+      } catch (_) {
+        return guardada || Response.error();
+      }
+    })());
+    return;
   }
   // El resto (Firestore, autenticación) va directo a la red
 });

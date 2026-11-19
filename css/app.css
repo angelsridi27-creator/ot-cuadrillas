@@ -188,3 +188,4 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--verde); }
 .toast-error { background: #7A1A12; }
 .toast-ok { background: var(--verde); }
 .toast.fuera { opacity: 0; }
+.aviso-reinicio { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 200; margin: 0; }

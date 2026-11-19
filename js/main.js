@@ -206,10 +206,24 @@ function vistaMisOts() {
   };
   pintar([], true);
   if (!p.cuadrilla && !esSup()) return;
+  let llego = false;
+  const recibir = ots => { llego = true; pintar(ots); };
   const un = esSup()
-    ? db.escucharTodasLasOts((ots) => pintar(ots), err => toast('No se pudieron leer las OT: ' + err.message, 'error'))
-    : db.escucharOtsDeCuadrilla(p.cuadrilla, (ots) => pintar(ots), err => toast('No se pudieron leer las OT: ' + err.message, 'error'));
+    ? db.escucharTodasLasOts(recibir, errorDeCarga)
+    : db.escucharOtsDeCuadrilla(p.cuadrilla, recibir, errorDeCarga);
   S.subs.push(un);
+  const t = setTimeout(() => {
+    if (llego) return;
+    const m = app.querySelector('main');
+    if (m) m.insertAdjacentHTML('beforeend', `<div class="aviso aviso-ambar"><div><strong>Está tardando más de lo normal</strong><span>Si no carga, tocá Reintentar.</span></div><button class="btn btn-chico" data-accion="reiniciar">Reintentar</button></div>`);
+  }, 10000);
+  S.subs.push(() => clearTimeout(t));
+}
+
+function errorDeCarga(err) {
+  console.error(err);
+  const m = app.querySelector('main') || app;
+  m.insertAdjacentHTML('afterbegin', `<div class="aviso aviso-rojo"><div><strong>No se pudieron cargar los datos</strong><span>${esc(err && err.message || err)}</span></div><button class="btn btn-chico" data-accion="reiniciar">Reintentar</button></div>`);
 }
 
 function vistaOt(id) {
@@ -319,32 +333,48 @@ function vistaCierre(id) {
     if (!ot) return navegar('#/');
     S.ot = ot; S.otMeta = meta;
     if (!meta.pendiente && !meta.desdeCache) pend.limpiar(id);
-    const activo = document.activeElement && document.activeElement.name === 'obs';
-    if (!activo) conservarScroll(pintarCierre);
-  });
+    if (app.querySelector('[data-vista="cierre"]')) actualizarCierre();
+    else pintarCierre();
+  }, err => errorDeCarga(err));
   S.subs.push(un);
+}
+
+function zonaListaCierre(ot, hoy) {
+  const hechos = (ot.items || []).filter(it => ot.marcas && ot.marcas[it.rid] && ot.marcas[it.rid].fecha === hoy);
+  return `<ul class="lista">${hechos.map(it => `<li><strong>${esc(it.pq)}</strong><span class="gris">${esc(it.txt)}</span></li>`).join('') || '<li class="gris">Todavía no marcaste trabajos hoy.</li>'}</ul>`;
+}
+
+function zonaEnvioCierre(ot) {
+  const pendientes = pend.leer(ot.id).length;
+  return pendientes
+    ? `<div class="aviso aviso-ambar" role="status">${icono.sinSenal}<div><strong>${pendientes} cambio${pendientes > 1 ? 's' : ''} todavía sin enviar</strong><span>Están guardados en el teléfono. Mantené la app abierta en un lugar con señal y se envían solos.</span></div></div>`
+    : `<div class="aviso aviso-verde" role="status">${icono.ok}<div><strong>Todo enviado</strong><span>La OT está actualizada para el supervisor.</span></div></div>`;
+}
+
+function actualizarCierre() {
+  const ot = S.ot; const hoy = hoyISO();
+  const l = app.querySelector('[data-zona="lista"]'); if (l) l.innerHTML = zonaListaCierre(ot, hoy);
+  const e = app.querySelector('[data-zona="envio"]'); if (e) e.innerHTML = zonaEnvioCierre(ot);
 }
 
 function pintarCierre() {
   const ot = S.ot;
   const { hoy, jHoy } = datosHoy(ot);
-  const hechos = (ot.items || []).filter(it => ot.marcas && ot.marcas[it.rid] && ot.marcas[it.rid].fecha === hoy);
-  const pendientes = pend.leer(ot.id).length;
+  const nHoy = Object.values(ot.marcas || {}).filter(m => m && m.fecha === hoy).length;
   render(`
-  <div class="pantalla">
+  <div class="pantalla" data-vista="cierre">
     ${encabezado({ titulo: 'Cierre de jornada', sub: `OT ${ot.nro}`, volver: `#/ot/${esc(ot.id)}` })}
     <main class="scroll contenido">
       <section class="tarjeta">
         <div class="fila"><span class="cuadro grande" style="background:${esc(jHoy ? jHoy.color : '#999')}"></span>
-          <div><strong class="tarjeta-titulo">Jornada ${jHoy ? jHoy.n : '-'} · ${fechaAR(hoy)}</strong><span class="gris">${hechos.length} trabajo${hechos.length === 1 ? '' : 's'} realizado${hechos.length === 1 ? '' : 's'} hoy</span></div></div>
-        <ul class="lista">${hechos.map(it => `<li><strong>${esc(it.pq)}</strong><span class="gris">${esc(it.txt)}</span></li>`).join('') || '<li class="gris">Todavía no marcaste trabajos hoy.</li>'}</ul>
+          <div><strong class="tarjeta-titulo">Jornada ${jHoy ? jHoy.n : '-'} · ${fechaAR(hoy)}</strong><span class="gris">${nHoy} trabajo${nHoy === 1 ? '' : 's'} realizado${nHoy === 1 ? '' : 's'} hoy</span></div></div>
+        <div data-zona="lista">${zonaListaCierre(ot, hoy)}</div>
         <label>Observaciones de la jornada (opcional)
-          <textarea name="obs" rows="3" data-cambio="obs" placeholder="Ej.: 220RT-224 sin acceso por camino anegado">${esc((ot.obsJornadas || {})[hoy] || '')}</textarea>
+          <textarea name="obs" rows="3" data-escribir="obs" placeholder="Ej.: 220RT-224 sin acceso por camino anegado">${esc((ot.obsJornadas || {})[hoy] || '')}</textarea>
         </label>
+        <span class="nota" data-zona="obs-estado"></span>
       </section>
-      ${pendientes
-        ? `<div class="aviso aviso-ambar" role="status">${icono.sinSenal}<div><strong>${pendientes} cambio${pendientes > 1 ? 's' : ''} todavía sin enviar</strong><span>Están guardados en el teléfono. Mantené la app abierta en un lugar con señal y se envían solos.</span></div></div>`
-        : `<div class="aviso aviso-verde" role="status">${icono.ok}<div><strong>Todo enviado</strong><span>La OT está actualizada para el supervisor.</span></div></div>`}
+      <div data-zona="envio">${zonaEnvioCierre(ot)}</div>
       <button class="btn btn-secundario btn-grande" data-accion="pdf" data-id="${esc(ot.id)}">Descargar PDF de la OT</button>
       <a class="btn btn-primario btn-grande" href="#/">Terminar</a>
     </main>
@@ -548,6 +578,7 @@ app.addEventListener('click', async e => {
     if (e.target.closest('.hoja') && el.classList.contains('velo')) return;
     S.seleccion = null; conservarScroll(pintarOt); return;
   }
+  if (acc === 'reiniciar') { location.reload(); return; }
   if (acc === 'salir') { limpiarSubs(); await db.salir(); location.hash = '#/'; return; }
   if (acc === 'instalar' && S.instalar) { S.instalar.prompt(); S.instalar = null; refrescarAvisos(); return; }
   if (acc === 'filtro') { S.filtro = el.dataset.valor; conservarScroll(pintarOt); return; }
@@ -605,10 +636,24 @@ app.addEventListener('change', async e => {
     }
     return;
   }
-  if (c === 'obs') {
-    db.guardarObservacionJornada(S.ot.id, hoyISO(), el.value.trim()).catch(err => toast(err.message, 'error'));
-    pend.agregar(S.ot.id, 'obs');
-  }
+});
+
+let temporizadorObs = null;
+app.addEventListener('input', e => {
+  const el = e.target.closest('[data-escribir="obs"]');
+  if (!el || !S.ot) return;
+  const otId = S.ot.id, fecha = hoyISO(), texto = el.value.trim();
+  const estado = app.querySelector('[data-zona="obs-estado"]');
+  if (estado) estado.textContent = 'Guardando…';
+  clearTimeout(temporizadorObs);
+  temporizadorObs = setTimeout(() => {
+    pend.agregar(otId, 'obs');
+    db.guardarObservacionJornada(otId, fecha, texto).catch(err => toast(err.message, 'error'));
+    const est = app.querySelector('[data-zona="obs-estado"]');
+    if (est) est.textContent = 'Observación guardada';
+    const env = app.querySelector('[data-zona="envio"]');
+    if (env && S.ot && S.ot.id === otId) env.innerHTML = zonaEnvioCierre(S.ot);
+  }, 700);
 });
 
 app.addEventListener('submit', async e => {
@@ -674,6 +719,14 @@ app.addEventListener('submit', async e => {
 });
 
 // ---------------- Arranque ----------------
+
+function avisoReinicio(msg) {
+  if (!/INTERNAL ASSERTION|Firestore|IndexedDB/i.test(String(msg))) return;
+  if (document.querySelector('.aviso-reinicio')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div class="aviso aviso-rojo aviso-reinicio" role="alert"><div><strong>Hay que reiniciar la app</strong><span>Lo marcado está guardado en el teléfono.</span></div><button class="btn btn-chico" onclick="location.reload()">Reiniciar</button></div>`);
+}
+window.addEventListener('error', e => avisoReinicio(e.message));
+window.addEventListener('unhandledrejection', e => avisoReinicio(e.reason && (e.reason.message || e.reason)));
 
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.instalar = e; refrescarAvisos(); });
 
