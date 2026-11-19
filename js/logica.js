@@ -80,7 +80,12 @@ export function fechaAR(iso) {
  * Así dos teléfonos sin señal nunca se "pisan" el número de jornada.
  */
 export function jornadasDeOT(marcas, colores = COLORES_DEFECTO, fechaExtra = null) {
-  const fechas = new Set(Object.values(marcas || {}).map(m => m && m.fecha).filter(Boolean));
+  const fechas = new Set();
+  for (const m of Object.values(marcas || {})) {
+    if (!m) continue;
+    if (m.fecha) fechas.add(m.fecha);
+    if (m.proceso && m.proceso.fecha) fechas.add(m.proceso.fecha); // un "en proceso" anterior conserva su jornada
+  }
   if (fechaExtra) fechas.add(fechaExtra);
   return [...fechas].sort().map((fecha, i) => ({
     n: i + 1,
@@ -116,8 +121,21 @@ export function secuenciaDeNro(nro) {
   return isNaN(n) ? 0 : n;
 }
 
+/** 'pendiente' | 'proceso' | 'realizado' */
+export function estadoMarca(m) {
+  if (!m) return 'pendiente';
+  return m.estado === 'proceso' ? 'proceso' : 'realizado';
+}
+
+export const MOTIVOS_PROCESO = ['Falta grúa alta', 'Falta material', 'Sin acceso al piquete', 'No alcanzó el tiempo', 'Condiciones climáticas'];
+
 export function avanceOT(ot) {
-  const total = (ot.items || []).length;
-  const hechos = Object.keys(ot.marcas || {}).filter(k => ot.marcas[k]).length;
-  return { total, hechos, pct: total ? Math.round((hechos / total) * 100) : 0 };
+  const items = ot.items || [];
+  const total = items.length;
+  const marcas = ot.marcas || {};
+  const hechos = items.filter(it => estadoMarca(marcas[it.rid]) === 'realizado').length;
+  const enProceso = items.filter(it => estadoMarca(marcas[it.rid]) === 'proceso').length;
+  const prio = ot.prioritarios || {};
+  const prioPendientes = items.filter(it => prio[it.rid] && estadoMarca(marcas[it.rid]) !== 'realizado').length;
+  return { total, hechos, enProceso, prioPendientes, pct: total ? Math.round((hechos / total) * 100) : 0 };
 }

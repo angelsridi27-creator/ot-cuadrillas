@@ -14,4 +14,4 @@ export const CORREO_ADMIN = 'angelsridi27@gmail.com';
 // Los operarios entran con un usuario corto; internamente se usa usuario@DOMINIO.
 export const DOMINIO_USUARIOS = 'cuadrillas.app';
 
-export const VERSION_APP = '1.0.1';
+export const VERSION_APP = '1.1.0';

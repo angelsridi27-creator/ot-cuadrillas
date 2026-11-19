@@ -189,3 +189,28 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--verde); }
 .toast-ok { background: var(--verde); }
 .toast.fuera { opacity: 0; }
 .aviso-reinicio { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 200; margin: 0; }
+
+/* Prioritario y En proceso */
+.marca-prio { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: #1D3557; padding: 3px 8px; border-radius: 999px; align-self: flex-start; }
+.marca-prio.grande { font-size: 13px; padding: 6px 12px; margin: 0; }
+.celda .marca-prio { position: absolute; top: 6px; left: 6px; font-size: 10px; padding: 2px 6px; }
+.celda-prio { border: 3px solid #1D3557; padding-top: 24px; }
+.celda .marca-proceso { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: #B54708; padding: 2px 8px; border-radius: 999px; }
+.celda-proceso { border: 2px dashed #B54708; }
+.tachado { background: linear-gradient(to top right, transparent calc(50% - 2.5px), var(--c) calc(50% - 2.5px), var(--c) calc(50% + 2.5px), transparent calc(50% + 2.5px)); }
+.tachado-medio {
+  position: absolute; left: 0; bottom: 0; width: 50%; height: 50%; pointer-events: none;
+  background: linear-gradient(to top right, transparent calc(50% - 2.5px), var(--c) calc(50% - 2.5px), var(--c) calc(50% + 2.5px), transparent calc(50% + 2.5px));
+}
+.btn-proceso { background: #fff; border: 2px solid #B54708; color: #B54708; }
+.aviso-proceso { background: #FEF0E6; border-color: #F2B48A; color: #7A2E05; margin: 0; }
+.aviso-prio { background: #E8EEF6; border-color: #1D3557; color: #1D3557; text-align: left; width: calc(100% - 32px); font: inherit; cursor: pointer; }
+.aviso-prio svg { flex-shrink: 0; }
+.chips-motivo { display: flex; flex-wrap: wrap; gap: 8px; }
+.filtros { overflow-x: auto; scrollbar-width: none; }
+.filtros .pill { flex-shrink: 0; }
+.li-proceso { background: #FEF0E6 !important; }
+.li-proceso span { color: #7A2E05; }
+.etiqueta-proceso { font-size: 11px; font-weight: 600; color: #7A2E05; background: #FEF0E6; padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
+.centrado { text-align: center; }
+.check-prio { accent-color: #1D3557; }

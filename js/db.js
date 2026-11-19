@@ -99,26 +99,50 @@ export function escucharOt(id, cb, onError) {
 /**
  * Marca un trabajo como realizado en la fecha indicada.
  * No se espera la respuesta del servidor: sin señal queda en cola y se envía sola.
+ * Si estaba "en proceso", se conserva ese dato como historial.
  */
 export function marcarRealizado(ot, item, fecha, perfil) {
+  const previa = (ot.marcas || {})[item.rid];
+  const marca = { estado: 'realizado', fecha, por: perfil.uid, nombre: perfil.nombre || '', ts: serverTimestamp() };
+  if (previa && previa.estado === 'proceso') marca.proceso = { fecha: previa.fecha, motivo: previa.motivo || '', nombre: previa.nombre || '' };
+  return escribirMarca(ot, item, marca, { estado: 'Realizado', fechaEjecucion: fechaAR(fecha) });
+}
+
+/** Trabajo hecho a medias: queda "en proceso" con su motivo. */
+export function marcarEnProceso(ot, item, fecha, motivo, perfil) {
+  const marca = { estado: 'proceso', fecha, motivo, por: perfil.uid, nombre: perfil.nombre || '', ts: serverTimestamp() };
+  return escribirMarca(ot, item, marca, { estado: 'En proceso', fechaEjecucion: fechaAR(fecha) });
+}
+
+function escribirMarca(ot, item, marca, reclamo) {
   const b = writeBatch(db);
-  b.update(doc(db, 'ots', ot.id), {
-    [`marcas.${item.rid}`]: { fecha, por: perfil.uid, nombre: perfil.nombre || '', ts: serverTimestamp() },
-    actualizado: serverTimestamp()
-  });
-  b.update(doc(db, 'reclamos', item.rid), {
-    estado: 'Realizado', fechaEjecucion: fechaAR(fecha), otNro: ot.nro, actualizado: serverTimestamp()
-  });
+  b.update(doc(db, 'ots', ot.id), { [`marcas.${item.rid}`]: marca, actualizado: serverTimestamp() });
+  b.update(doc(db, 'reclamos', item.rid), { ...reclamo, otNro: ot.nro, actualizado: serverTimestamp() });
   return b.commit();
 }
 
+/** Deshace la última marca. Si era un realizado que venía de "en proceso", vuelve a "en proceso". */
 export function desmarcar(ot, item) {
+  const previa = (ot.marcas || {})[item.rid];
   const b = writeBatch(db);
-  b.update(doc(db, 'ots', ot.id), { [`marcas.${item.rid}`]: deleteField(), actualizado: serverTimestamp() });
-  b.update(doc(db, 'reclamos', item.rid), {
-    estado: 'Pendiente', fechaEjecucion: '', actualizado: serverTimestamp()
-  });
+  if (previa && previa.estado !== 'proceso' && previa.proceso) {
+    b.update(doc(db, 'ots', ot.id), {
+      [`marcas.${item.rid}`]: { estado: 'proceso', fecha: previa.proceso.fecha, motivo: previa.proceso.motivo, nombre: previa.proceso.nombre || '' },
+      actualizado: serverTimestamp()
+    });
+    b.update(doc(db, 'reclamos', item.rid), { estado: 'En proceso', fechaEjecucion: fechaAR(previa.proceso.fecha), actualizado: serverTimestamp() });
+  } else {
+    b.update(doc(db, 'ots', ot.id), { [`marcas.${item.rid}`]: deleteField(), actualizado: serverTimestamp() });
+    b.update(doc(db, 'reclamos', item.rid), { estado: 'Pendiente', fechaEjecucion: '', actualizado: serverTimestamp() });
+  }
   return b.commit();
+}
+
+/** Supervisor: marca o quita un trabajo como prioritario dentro de la OT. */
+export function cambiarPrioritario(otId, rid, valor) {
+  return updateDoc(doc(db, 'ots', otId), {
+    [`prioritarios.${rid}`]: valor ? true : deleteField(), actualizado: serverTimestamp()
+  });
 }
 
 export function guardarObservacionJornada(otId, fecha, texto) {
@@ -132,7 +156,7 @@ export function cambiarEstadoOt(otId, estado) {
 // ---------------- Reclamos y emisión de OT (supervisor) ----------------
 
 export async function reclamosPendientes() {
-  const s = await getDocs(query(collection(db, 'reclamos'), where('estado', '==', 'Pendiente')));
+  const s = await getDocs(query(collection(db, 'reclamos'), where('estado', 'in', ['Pendiente', 'En proceso'])));
   return s.docs.map(conId);
 }
 
@@ -171,6 +195,7 @@ export async function emitirOt(datos, reclamos, perfil) {
     items,
     marcas: {},
     obsJornadas: {},
+    prioritarios: Object.fromEntries((datos.prioritarios || []).map(rid => [rid, true])),
     creadoPor: perfil.uid,
     creado: serverTimestamp(),
     actualizado: serverTimestamp()

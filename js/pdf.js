@@ -1,7 +1,7 @@
 // Genera el PDF de la OT con el formato SG-R09 y el tachado diagonal por jornada.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS
+  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca
 } from './logica.js';
 
 const W = 612, H = 792, M = 30, CW = W - 2 * M;
@@ -204,9 +204,20 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
         L.texto(it.pq, cx, y + 1, colW, pqH, { size: 8.5, bold: true, min: 5 });
         L.rect(cx + 0.6, y + pqH + 1, colW - 1.2, celdaH - pqH - 1.6, { fill: hex(fondoPrioridad(it.prio)), borde: false });
         L.texto(it.txt, cx, y + pqH + 1, colW, celdaH - pqH - 1.6, { size: 7, min: 4.5, mayus: true });
+        if (ot.prioritarios && ot.prioritarios[it.rid]) {
+          // trabajo prioritario: borde grueso y triángulo negro en la esquina
+          L.rect(cx + 1, y + 1, colW - 2, celdaH - 2, { grosor: 1.8 });
+          L.page.drawSvgPath('M 0 0 L 9 0 L 0 9 Z', { x: cx + 1, y: H - y - 1, color: NEGRO });
+        }
         const marca = ot.marcas && ot.marcas[it.rid];
         if (marca && colorDeFecha[marca.fecha]) {
-          L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, hex(colorDeFecha[marca.fecha]), 2.4);
+          const col = hex(colorDeFecha[marca.fecha]);
+          if (estadoMarca(marca) === 'proceso') {
+            // en proceso: media diagonal (desde la esquina inferior izquierda hasta el centro)
+            L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW / 2, y + celdaH / 2, col, 2.4);
+          } else {
+            L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, col, 2.4);
+          }
         }
       }
       y += altoFila;
@@ -220,7 +231,14 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
     .filter(([, t]) => t && String(t).trim())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([f, t]) => `${fechaAR(f)}: ${t}`);
-  const textoObs = [ot.observacion || '', ...obsJ].filter(Boolean).join('\n');
+  const enProceso = (ot.items || [])
+    .filter(it => estadoMarca((ot.marcas || {})[it.rid]) === 'proceso')
+    .map(it => `${it.pq}: EN PROCESO (${fechaAR(ot.marcas[it.rid].fecha)}) - ${ot.marcas[it.rid].motivo || ''}`);
+  const hayPrio = Object.keys(ot.prioritarios || {}).some(k => ot.prioritarios[k]);
+  const referencias = (hayPrio || enProceso.length)
+    ? ['Referencias: ' + [hayPrio ? 'borde grueso con triángulo = trabajo prioritario' : '', enProceso.length ? 'media diagonal = en proceso' : ''].filter(Boolean).join(' · ')]
+    : [];
+  const textoObs = [ot.observacion || '', ...enProceso, ...obsJ, ...referencias].filter(Boolean).join('\n');
   const bloqueFinal = 12 + 44 + 12 + 36;
   if (y + bloqueFinal > limite) { L.nuevaPagina(); y = M; }
 
