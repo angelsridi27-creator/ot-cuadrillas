@@ -104,6 +104,7 @@ function enrutar() {
   if (!S.user) return vistaLogin();
   if (!S.perfil) return vistaSinPerfil();
   if (S.perfil.activo === false) return vistaSinPerfil(true);
+  if (S.perfil.rol === 'inspector') return vistaInspector();
   const r = ruta();
   if (r.a === 'ot' && r.b) return r.c === 'cierre' ? vistaCierre(r.b) : vistaOt(r.b);
   if (r.a === 'sup' && esSup()) return vistaSupervisor(r.b || 'ots');
@@ -137,6 +138,15 @@ function vistaLogin(error = '') {
       <p class="nota">La primera vez necesitás señal para ingresar. Después la app funciona sin conexión.</p>
     </form>
     <p class="version">v${VERSION_APP}</p>
+  </div>`);
+}
+
+function vistaInspector() {
+  render(`
+  <div class="centro">
+    <h1>Usuario de inspección de poda</h1>
+    <p>Este usuario es para la app de certificación de poda, no para las OT de cuadrillas.</p>
+    <button class="btn" data-accion="salir">${icono.salir} Salir</button>
   </div>`);
 }
 
@@ -568,7 +578,7 @@ async function supUsuarios() {
           <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Cuadrilla</th><th>Estado</th></tr></thead>
           <tbody>${S.usuarios.map(u => `<tr>
             <td class="negrita">${esc(u.nombre)}</td><td class="mono">${esc(u.usuario)}</td>
-            <td>${u.rol === 'supervisor' ? 'Supervisor' : 'Operario'}</td><td>${esc(u.cuadrilla)}</td>
+            <td>${u.rol === 'supervisor' ? 'Supervisor' : u.rol === 'inspector' ? 'Inspector de poda' : 'Operario'}</td><td>${esc(u.cuadrilla)}</td>
             <td><button class="btn btn-chico" data-accion="activo" data-uid="${esc(u.id)}" data-valor="${u.activo === false ? '1' : '0'}">${u.activo === false ? 'Reactivar' : 'Desactivar'}</button></td>
           </tr>`).join('')}</tbody></table></div>` : '<p class="nota">Todavía no hay usuarios. Creá el primero con el formulario.</p>'}
       </section>
@@ -577,7 +587,7 @@ async function supUsuarios() {
         <label>Nombre y apellido<input name="nombre" required placeholder="ej.: Gustavo Rojo"></label>
         <label>Usuario (para ingresar)<input name="usuario" required autocapitalize="none" spellcheck="false" placeholder="ej.: rojo.g" pattern="[a-z0-9._-]+"></label>
         <label>Contraseña (mínimo 6 caracteres)<input name="clave" required minlength="6"></label>
-        <label>Rol<select name="rol"><option value="operario">Operario</option><option value="supervisor">Supervisor</option></select></label>
+        <label>Rol<select name="rol"><option value="operario">Operario</option><option value="supervisor">Supervisor</option><option value="inspector">Inspector de poda</option></select></label>
         <label>Cuadrilla<input name="cuadrilla" list="lista-cuadrillas2" placeholder="ej.: RAT TcT/TsT"></label>
         <datalist id="lista-cuadrillas2">${cuadrillas.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
         <button class="btn btn-primario btn-grande" type="submit">Crear usuario</button>
