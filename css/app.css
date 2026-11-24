@@ -214,3 +214,12 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--verde); }
 .etiqueta-proceso { font-size: 11px; font-weight: 600; color: #7A2E05; background: #FEF0E6; padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
 .centrado { text-align: center; }
 .check-prio { accent-color: #1D3557; }
+
+/* Poda hecha por una empresa privada (certificada desde la app de poda) */
+.celda-privada { border-style: dashed; }
+.celda-privada strong, .celda-privada > span:not(.marca-privada) { color: #5F6B66; }
+.celda .marca-privada { font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; background: #5F6B66; padding: 2px 8px; border-radius: 999px; }
+.aviso-privado { background: #EEF1F0; border-color: #A9B4AF; color: #33403A; margin: 0; }
+.revisar .candidatos { display: flex; flex-direction: column; gap: 8px; }
+.revisar .candidatos .btn { justify-content: flex-start; text-align: left; height: auto; min-height: 44px; padding: 8px 14px; }
+.revisar .btn-peligro { align-self: flex-start; }

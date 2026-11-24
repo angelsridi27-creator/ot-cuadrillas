@@ -3,7 +3,7 @@ import * as db from './db.js';
 import {
   agruparPorCategoria, jornadasDeOT, jornadaDeFecha, hoyISO, fechaAR, fondoPrioridad,
   avanceOT, categoriaOT, textoInicialOT, compararPiquetes, CATEGORIAS_OT, MAX_JORNADAS,
-  COLORES_DEFECTO, secuenciaDeNro, estadoMarca, MOTIVOS_PROCESO
+  COLORES_DEFECTO, secuenciaDeNro, estadoMarca, MOTIVOS_PROCESO, privadoDe
 } from './logica.js';
 import { VERSION_APP } from './config.js';
 
@@ -204,10 +204,10 @@ function vistaMisOts() {
           const a = avanceOT(ot);
           return `
           <a class="tarjeta tarjeta-ot" href="#/ot/${esc(ot.id)}">
-            <div class="fila-esp"><span class="mono verde">OT ${esc(ot.nro)}</span><span class="estado ${a.hechos || a.enProceso ? 'estado-curso' : ''}">${a.hechos || a.enProceso ? 'En curso' : 'Sin empezar'}</span></div>
+            <div class="fila-esp"><span class="mono verde">OT ${esc(ot.nro)}</span><span class="estado ${a.hechos || a.enProceso || a.privados ? 'estado-curso' : ''}">${a.hechos || a.enProceso || a.privados ? 'En curso' : 'Sin empezar'}</span></div>
             <strong class="tarjeta-titulo">${esc(ot.linea)}</strong>
             <span class="gris">${ot.codigoLinea ? `Línea ${esc(ot.codigoLinea)} · ` : ''}Emitida ${fechaAR(ot.fechaEmision)}</span>
-            <div class="fila-esp chico"><span>${a.hechos} de ${a.total} realizados${a.enProceso ? ` · ${a.enProceso} en proceso` : ''}</span><span class="gris">${a.pct}%</span></div>
+            <div class="fila-esp chico"><span>${a.hechos} de ${a.total} realizados${a.enProceso ? ` · ${a.enProceso} en proceso` : ''}${a.privados ? ` · ${a.privados} poda privada` : ''}</span><span class="gris">${a.pct}%</span></div>
             ${a.prioPendientes ? `<span class="marca-prio">${icono.bandera}${a.prioPendientes} prioritario${a.prioPendientes > 1 ? 's' : ''} sin terminar</span>` : ''}
             ${barraAvance(ot)}
             <div class="chips">${chipsJornadas(ot)}</div>
@@ -272,8 +272,9 @@ function pintarOt() {
   const f = S.filtro;
   const pasa = it => {
     const e = estadoMarca(marcas[it.rid]);
-    return f === 'todos' || (f === 'prio' && prio[it.rid]) || (f === 'pend' && e === 'pendiente') ||
-      (f === 'proceso' && e === 'proceso') || (f === 'hechos' && e === 'realizado');
+    const priv = !!privadoDe(ot, it.rid) && e !== 'realizado';
+    return f === 'todos' || (f === 'prio' && prio[it.rid] && !priv) || (f === 'pend' && e === 'pendiente' && !priv) ||
+      (f === 'proceso' && e === 'proceso' && !priv) || (f === 'hechos' && (e === 'realizado' || priv));
   };
   const grupos = agruparPorCategoria(ot.items).map(g => ({
     ...g,
@@ -305,16 +306,20 @@ function pintarOt() {
           <div class="grilla">
             ${g.items.map(it => {
               const m = marcas[it.rid];
-              const e = estadoMarca(m);
-              const color = m ? colorDe[m.fecha] : '';
-              const esPrio = !!prio[it.rid];
-              const textoEstado = e === 'realizado' ? 'realizado el ' + fechaAR(m.fecha) : e === 'proceso' ? 'en proceso desde el ' + fechaAR(m.fecha) : 'pendiente';
-              return `<button class="celda ${esPrio ? 'celda-prio' : ''} ${e === 'proceso' ? 'celda-proceso' : ''}" style="--fp:${fondoPrioridad(it.prio)};--c:${esc(color || 'transparent')}" data-accion="abrir" data-rid="${esc(it.rid)}"
+              let e = estadoMarca(m);
+              const pv = e !== 'realizado' ? privadoDe(ot, it.rid) : null;
+              if (pv) e = 'privado';
+              const color = pv ? '#7A8580' : m ? colorDe[m.fecha] : '';
+              const esPrio = !!prio[it.rid] && !pv;
+              const textoEstado = e === 'realizado' ? 'realizado el ' + fechaAR(m.fecha) : e === 'proceso' ? 'en proceso desde el ' + fechaAR(m.fecha)
+                : e === 'privado' ? `poda hecha por ${pv.empresa || 'una empresa privada'}, certificada el ${fechaAR(pv.fecha)}` : 'pendiente';
+              return `<button class="celda ${esPrio ? 'celda-prio' : ''} ${e === 'proceso' ? 'celda-proceso' : ''} ${pv ? 'celda-privada' : ''}" style="--fp:${pv ? '#EEF1F0' : fondoPrioridad(it.prio)};--c:${esc(color || 'transparent')}" data-accion="abrir" data-rid="${esc(it.rid)}"
                 aria-label="${esc(it.pq)}, ${esc(it.txt)}, ${esPrio ? 'prioritario, ' : ''}${textoEstado}">
                 ${esPrio ? `<span class="marca-prio">${icono.bandera}Prioritario</span>` : ''}
                 <strong>${esc(it.pq)}</strong><span>${esc(it.txt)}</span>
                 ${e === 'proceso' ? '<span class="marca-proceso">En proceso</span>' : ''}
-                ${e === 'realizado' ? '<i class="tachado" aria-hidden="true"></i>' : ''}
+                ${pv ? `<span class="marca-privada">Poda privada${pv.empresa ? ' · ' + esc(pv.empresa) : ''}</span>` : ''}
+                ${e === 'realizado' || pv ? '<i class="tachado" aria-hidden="true"></i>' : ''}
                 ${e === 'proceso' ? '<i class="tachado-medio" aria-hidden="true"></i>' : ''}
               </button>`;
             }).join('')}
@@ -335,10 +340,11 @@ function hojaDetalle(ot, rid, { hoy, jHoy, cerrada }) {
   if (!it) return '';
   const m = (ot.marcas || {})[rid];
   const e = estadoMarca(m);
-  const esPrio = !!(ot.prioritarios || {})[rid];
+  const pv = e !== 'realizado' ? privadoDe(ot, rid) : null;
+  const esPrio = !!(ot.prioritarios || {})[rid] && !pv;
   const hayJornada = jHoy && !jHoy.excedida;
-  const puedeRealizar = !cerrada && hayJornada && e !== 'realizado';
-  const puedeProceso = !cerrada && hayJornada && e === 'pendiente';
+  const puedeRealizar = !cerrada && hayJornada && e !== 'realizado' && !pv;
+  const puedeProceso = !cerrada && hayJornada && e === 'pendiente' && !pv;
   const puedeDeshacer = !cerrada && m && (m.fecha === hoy || esSup());
   const coord = String(it.coord || '').replace(/\s/g, '');
 
@@ -365,13 +371,14 @@ function hojaDetalle(ot, rid, { hoy, jHoy, cerrada }) {
       </div>
       ${esPrio ? `<p class="marca-prio grande">${icono.bandera}Trabajo prioritario</p>` : ''}
       <p class="hoja-texto">${esc(it.txt)}</p>
+      ${pv ? `<div class="aviso aviso-privado"><div><strong>Poda hecha por ${esc(pv.empresa || 'una empresa privada')}</strong><span>Certificada por EPEC el ${fechaAR(pv.fecha)}${pv.porNombre ? ' (' + esc(pv.porNombre) + ')' : ''}${pv.vano ? ' · vano ' + esc(pv.vano) : ''}. No hace falta que la cuadrilla la haga.</span></div></div>` : ''}
       ${e === 'proceso' ? `<div class="aviso aviso-proceso"><div><strong>En proceso desde el ${fechaAR(m.fecha)}</strong><span>${esc(m.motivo || '')}${m.nombre ? ' · ' + esc(m.nombre) : ''}</span></div></div>` : ''}
       ${e === 'realizado' ? `<p class="${m.fecha === hoy ? 'verde' : 'gris'} negrita">Realizado el ${fechaAR(m.fecha)}${m.nombre ? ' · ' + esc(m.nombre) : ''}</p>${m.proceso ? `<p class="gris chico">Estuvo en proceso el ${fechaAR(m.proceso.fecha)}: ${esc(m.proceso.motivo || '')}</p>` : ''}` : ''}
       ${puedeRealizar ? `<button class="btn btn-primario btn-grande" data-accion="marcar" data-rid="${esc(rid)}"><span class="cuadro" style="background:${esc(jHoy.color)}"></span>${e === 'proceso' ? 'Terminado hoy' : 'Marcar realizado hoy'}</button>` : ''}
       ${puedeProceso ? `<button class="btn btn-proceso btn-grande" data-accion="proceso" data-rid="${esc(rid)}">Quedó en proceso (a medias)</button>` : ''}
       ${puedeDeshacer ? `<button class="btn btn-peligro btn-grande" data-accion="desmarcar" data-rid="${esc(rid)}">${m.fecha === hoy ? 'Deshacer' : 'Quitar marca (supervisor)'}</button>` : ''}
       ${m && !puedeDeshacer && !cerrada && e === 'realizado' ? '<p class="gris">Es de una jornada anterior. Solo el supervisor puede corregirlo.</p>' : ''}
-      ${esSup() && !cerrada ? `<button class="btn btn-secundario" data-accion="prioritario" data-rid="${esc(rid)}" data-valor="${esPrio ? '0' : '1'}">${icono.bandera}${esPrio ? 'Quitar prioridad' : 'Marcar como prioritario'}</button>` : ''}
+      ${esSup() && !cerrada && !pv ? `<button class="btn btn-secundario" data-accion="prioritario" data-rid="${esc(rid)}" data-valor="${esPrio ? '0' : '1'}">${icono.bandera}${esPrio ? 'Quitar prioridad' : 'Marcar como prioritario'}</button>` : ''}
       ${coord ? `<a class="btn btn-secundario" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coord)}" target="_blank" rel="noopener">Ver ubicación del piquete</a>` : ''}
       <button class="btn btn-secundario" data-accion="cerrar-hoja">Cerrar</button>
     </div>
@@ -441,7 +448,7 @@ function pintarCierre() {
 // ---------------- Vistas: supervisor ----------------
 
 function vistaSupervisor(seccion) {
-  const secciones = [['ots', 'OT emitidas'], ['emitir', 'Emitir OT'], ['usuarios', 'Usuarios'], ['colores', 'Colores']];
+  const secciones = [['ots', 'OT emitidas'], ['emitir', 'Emitir OT'], ['privada', `Poda privada${S.nRevisar ? ' · ' + S.nRevisar : ''}`], ['usuarios', 'Usuarios'], ['colores', 'Colores']];
   render(`
   <div class="panel">
     <nav class="panel-nav" aria-label="Secciones">
@@ -455,8 +462,35 @@ function vistaSupervisor(seccion) {
   if (seccion === 'emitir') return supEmitir();
   if (seccion === 'usuarios') return supUsuarios();
   if (seccion === 'colores') return supColores();
+  if (seccion === 'privada') return supPrivada();
   return supOts();
 }
+
+// Reclamos de poda que pueden coincidir con un vano certificado, pero no con seguridad
+function supPrivada() {
+  const pintar = lista => {
+    S.revisar = lista;
+    panelMain(`
+      <div class="panel-cab"><div><h1>Poda privada · Para revisar</h1>
+        <p class="gris">Reclamos de poda que pueden corresponder a un vano que ya certificó un inspector. Si es el mismo trabajo, elegí el vano: el reclamo se cierra como "${esc(ESTADO_PRIVADO_UI)}" y se tacha en gris en la OT.</p></div></div>
+      ${lista.length ? '' : '<div class="vacio"><strong>No hay nada para revisar</strong><span>Los reclamos que coinciden con seguridad con un vano certificado se tachan solos.</span></div>'}
+      ${lista.map(r => `
+        <section class="tarjeta revisar">
+          <div class="fila-esp arriba"><div><span class="etiqueta">${esc(r.lineaReclamo)}</span><strong class="tarjeta-titulo">Piquete ${esc(r.piquete)}</strong></div>
+            ${r.otNro ? `<span class="etiqueta-ot">En OT ${esc(r.otNro)}</span>` : ''}</div>
+          ${r.observacion ? `<p class="hoja-texto chico">${esc(r.observacion)}</p>` : ''}
+          <p class="gris chico">Relevado el ${esc(r.fechaReclamo)} · ${esc(r.motivo)}</p>
+          <div class="candidatos">
+            ${(r.candidatos || []).map((c, i) => `<button class="btn btn-secundario" data-accion="confirmar-privado" data-rid="${esc(r.id)}" data-i="${i}">
+              Es el vano <b>${esc(c.vano)}</b> · certificado ${fechaAR(c.fecha)}${c.empresa ? ' · ' + esc(c.empresa) : ''}</button>`).join('')}
+          </div>
+          <button class="btn btn-chico btn-peligro" data-accion="descartar-privado" data-rid="${esc(r.id)}">No corresponde (lo hace la cuadrilla)</button>
+        </section>`).join('')}`);
+  };
+  panelMain('<p class="nota">Cargando…</p>');
+  S.subs.push(db.escucharRevisar(pintar, err => panelMain(`<p class="error">${esc(err.message)}</p>`)));
+}
+const ESTADO_PRIVADO_UI = 'Realizado (privado)';
 
 const panelMain = html => { const m = document.getElementById('panel-main'); if (m) m.innerHTML = html; };
 
@@ -684,6 +718,21 @@ app.addEventListener('click', async e => {
     return;
   }
   if (acc === 'pdf') return descargarPdf(el.dataset.id);
+  if (acc === 'confirmar-privado' || acc === 'descartar-privado') {
+    const r = (S.revisar || []).find(x => x.id === el.dataset.rid);
+    if (!r) return;
+    el.disabled = true;
+    try {
+      if (acc === 'confirmar-privado') {
+        const msg = await db.confirmarPrivado(r, r.candidatos[Number(el.dataset.i)], S.perfil);
+        toast(msg || 'Reclamo cerrado y tachado en la OT', 'ok');
+      } else {
+        await db.descartarRevisar(r, S.perfil);
+        toast('Queda pendiente para la cuadrilla', 'ok');
+      }
+    } catch (err) { el.disabled = false; toast('No se pudo guardar: ' + err.message, 'error'); }
+    return;
+  }
   if (acc === 'estado-ot') {
     const cerrar = el.dataset.valor === 'cerrada';
     if (cerrar && !confirm('¿Cerrar la OT? La cuadrilla ya no podrá marcar trabajos.')) return;
@@ -837,12 +886,21 @@ if ('serviceWorker' in navigator) {
 
 vistaCargando();
 let configSub = null;
+let revisarSub = null;
 db.alCambiarSesion(async user => {
   S.user = user;
   if (configSub) { configSub(); configSub = null; }
   if (!user) { S.perfil = null; return enrutar(); }
   vistaCargando('Cargando tu usuario…');
   S.perfil = await db.obtenerPerfil(user);
+  if (revisarSub) { revisarSub(); revisarSub = null; }
+  if (esSup()) {
+    revisarSub = db.contarRevisar(n => {
+      S.nRevisar = n;
+      const a = document.querySelector('a[href="#/sup/privada"]');
+      if (a) a.textContent = `Poda privada${n ? ' · ' + n : ''}`;
+    });
+  }
   configSub = db.escucharConfig(cfg => {
     const cambioColores = JSON.stringify(cfg.colores) !== JSON.stringify(S.config.colores);
     S.config = cfg;

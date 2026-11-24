@@ -1,7 +1,7 @@
 // Genera el PDF de la OT con el formato SG-R09 y el tachado diagonal por jornada.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca
+  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca, privadoDe
 } from './logica.js';
 
 const W = 612, H = 792, M = 30, CW = W - 2 * M;
@@ -9,6 +9,7 @@ const NEGRO = rgb(0, 0, 0);
 const GRIS_BARRA = rgb(0.74, 0.74, 0.74);
 const GRIS_LABEL = rgb(0.85, 0.85, 0.85);
 const VERDE_EPEC = rgb(0, 0.44, 0.29);
+const GRIS_PRIVADO = rgb(0.45, 0.48, 0.47);
 
 function hex(c) {
   const h = String(c || '#000000').replace('#', '');
@@ -210,7 +211,11 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
           L.page.drawSvgPath('M 0 0 L 9 0 L 0 9 Z', { x: cx + 1, y: H - y - 1, color: NEGRO });
         }
         const marca = ot.marcas && ot.marcas[it.rid];
-        if (marca && colorDeFecha[marca.fecha]) {
+        const priv = estadoMarca(marca) !== 'realizado' ? privadoDe(ot, it.rid) : null;
+        if (priv) {
+          // poda hecha por una empresa privada: diagonal gris
+          L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, GRIS_PRIVADO, 2.4);
+        } else if (marca && colorDeFecha[marca.fecha]) {
           const col = hex(colorDeFecha[marca.fecha]);
           if (estadoMarca(marca) === 'proceso') {
             // en proceso: media diagonal (desde la esquina inferior izquierda hasta el centro)
@@ -234,11 +239,15 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
   const enProceso = (ot.items || [])
     .filter(it => estadoMarca((ot.marcas || {})[it.rid]) === 'proceso')
     .map(it => `${it.pq}: EN PROCESO (${fechaAR(ot.marcas[it.rid].fecha)}) - ${ot.marcas[it.rid].motivo || ''}`);
+  const privados = (ot.items || [])
+    .filter(it => estadoMarca((ot.marcas || {})[it.rid]) !== 'realizado' && privadoDe(ot, it.rid))
+    .map(it => { const p = privadoDe(ot, it.rid); return `${it.pq}: PODA REALIZADA POR ${p.empresa || 'EMPRESA PRIVADA'} - CERTIFICADA ${fechaAR(p.fecha)}`; });
   const hayPrio = Object.keys(ot.prioritarios || {}).some(k => ot.prioritarios[k]);
-  const referencias = (hayPrio || enProceso.length)
-    ? ['Referencias: ' + [hayPrio ? 'borde grueso con triángulo = trabajo prioritario' : '', enProceso.length ? 'media diagonal = en proceso' : ''].filter(Boolean).join(' · ')]
+  const referencias = (hayPrio || enProceso.length || privados.length)
+    ? ['Referencias: ' + [hayPrio ? 'borde grueso con triángulo = trabajo prioritario' : '', enProceso.length ? 'media diagonal = en proceso' : '',
+        privados.length ? 'diagonal gris = poda hecha por empresa privada' : ''].filter(Boolean).join(' · ')]
     : [];
-  const textoObs = [ot.observacion || '', ...enProceso, ...obsJ, ...referencias].filter(Boolean).join('\n');
+  const textoObs = [ot.observacion || '', ...enProceso, ...privados, ...obsJ, ...referencias].filter(Boolean).join('\n');
   const bloqueFinal = 12 + 44 + 12 + 36;
   if (y + bloqueFinal > limite) { L.nuevaPagina(); y = M; }
 

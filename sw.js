@@ -1,6 +1,6 @@
 // Service worker: guarda la app en el teléfono para que abra sin señal.
 // Los datos (OT, marcas) los maneja Firestore con su propia caché sin conexión.
-const VERSION = 'cuadrillas-v1.2.0';
+const VERSION = 'cuadrillas-v1.3.0';
 const APP = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/main.js', './js/db.js', './js/logica.js', './js/pdf.js', './js/config.js',

@@ -10,7 +10,7 @@ import {
   writeBatch, serverTimestamp, deleteField
 } from 'firebase/firestore';
 import { firebaseConfig, CORREO_ADMIN, DOMINIO_USUARIOS } from './config.js';
-import { COLORES_DEFECTO, categoriaOT, textoInicialOT, compararPiquetes, hoyISO, horaLocal, fechaAR, formatoNroOT } from './logica.js';
+import { COLORES_DEFECTO, categoriaOT, textoInicialOT, compararPiquetes, hoyISO, horaLocal, fechaAR, formatoNroOT, ESTADO_PRIVADO } from './logica.js';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -243,4 +243,60 @@ export async function crearUsuario({ usuario, clave, nombre, rol, cuadrilla }) {
 
 export function actualizarUsuario(uid, cambios) {
   return updateDoc(doc(db, 'usuarios', uid), cambios);
+}
+
+// ---------------- Poda privada (supervisor) ----------------
+
+/** Casos para revisar: reclamos de poda que pueden coincidir con un vano certificado. */
+export function escucharRevisar(cb, onError) {
+  return onSnapshot(query(collection(db, 'poda_revisar'), where('estado', '==', 'pendiente')), s => {
+    cb(s.docs.map(conId).sort((a, b) => String(a.lineaReclamo).localeCompare(String(b.lineaReclamo), 'es') ||
+      compararPiquetes(a.piquete, b.piquete)));
+  }, onError);
+}
+
+/** El supervisor confirma que el reclamo es la poda del vano certificado: se cierra y se tacha en la OT. */
+export async function confirmarPrivado(rev, cand, perfil) {
+  const rRef = doc(db, 'reclamos', rev.id);
+  const snap = await getDoc(rRef);
+  const b = writeBatch(db);
+  const cierre = { estado: 'confirmado', elegido: cand.clave, resolvio: perfil.nombre || perfil.email || '', resuelto: serverTimestamp() };
+  if (!snap.exists() || !['Pendiente', 'En proceso'].includes(snap.data().estado)) {
+    b.update(doc(db, 'poda_revisar', rev.id), cierre);
+    await b.commit();
+    return 'El reclamo ya no estaba pendiente; se sacó de la lista.';
+  }
+  const r = snap.data();
+  b.update(rRef, {
+    estado: ESTADO_PRIVADO,
+    fechaEjecucion: fechaAR(cand.fecha),
+    privado: {
+      tramoId: cand.tramoId, clave: cand.clave, vano: cand.vano, linea: rev.linea || '', empresa: cand.empresa || '',
+      fecha: cand.fecha || '', porNombre: cand.porNombre || '', estadoPrevio: r.estado, fechaPrevia: r.fechaEjecucion || '',
+      manual: true, confirmadoPor: perfil.nombre || perfil.email || ''
+    },
+    actualizado: serverTimestamp()
+  });
+  if (r.otNro) {
+    const ots = await getDocs(query(collection(db, 'ots'), where('nro', '==', r.otNro)));
+    ots.forEach(o => b.update(o.ref, {
+      [`privados.${rev.id}`]: { fecha: cand.fecha || '', empresa: cand.empresa || '', vano: cand.vano || '', porNombre: cand.porNombre || '' },
+      actualizado: serverTimestamp()
+    }));
+  }
+  b.update(doc(db, 'poda_revisar', rev.id), cierre);
+  await b.commit();
+  return '';
+}
+
+/** No es la misma poda: el reclamo sigue pendiente para la cuadrilla. */
+export function descartarRevisar(rev, perfil) {
+  return updateDoc(doc(db, 'poda_revisar', rev.id), {
+    estado: 'descartado', resolvio: perfil.nombre || perfil.email || '', resuelto: serverTimestamp()
+  });
+}
+
+/** Cantidad de casos para revisar (para el menú del panel). */
+export function contarRevisar(cb) {
+  return onSnapshot(query(collection(db, 'poda_revisar'), where('estado', '==', 'pendiente')), s => cb(s.size), () => cb(0));
 }

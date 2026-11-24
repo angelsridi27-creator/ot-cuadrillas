@@ -129,13 +129,23 @@ export function estadoMarca(m) {
 
 export const MOTIVOS_PROCESO = ['Falta grúa alta', 'Falta material', 'Sin acceso al piquete', 'No alcanzó el tiempo', 'Condiciones climáticas'];
 
+/** Estado del reclamo cuando la poda la hizo una empresa privada y EPEC la certificó. */
+export const ESTADO_PRIVADO = 'Realizado (privado)';
+
+/** Datos de la poda privada de un trabajo de la OT ({ empresa, fecha, vano, porNombre }), o null. */
+export function privadoDe(ot, rid) {
+  return (ot && ot.privados && ot.privados[rid]) || null;
+}
+
 export function avanceOT(ot) {
   const items = ot.items || [];
   const total = items.length;
   const marcas = ot.marcas || {};
+  const priv = it => !!privadoDe(ot, it.rid) && estadoMarca(marcas[it.rid]) !== 'realizado';
   const hechos = items.filter(it => estadoMarca(marcas[it.rid]) === 'realizado').length;
-  const enProceso = items.filter(it => estadoMarca(marcas[it.rid]) === 'proceso').length;
+  const privados = items.filter(priv).length;
+  const enProceso = items.filter(it => !priv(it) && estadoMarca(marcas[it.rid]) === 'proceso').length;
   const prio = ot.prioritarios || {};
-  const prioPendientes = items.filter(it => prio[it.rid] && estadoMarca(marcas[it.rid]) !== 'realizado').length;
-  return { total, hechos, enProceso, prioPendientes, pct: total ? Math.round((hechos / total) * 100) : 0 };
+  const prioPendientes = items.filter(it => prio[it.rid] && !priv(it) && estadoMarca(marcas[it.rid]) !== 'realizado').length;
+  return { total, hechos, privados, enProceso, prioPendientes, pct: total ? Math.round(((hechos + privados) / total) * 100) : 0 };
 }
