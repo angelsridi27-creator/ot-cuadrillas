@@ -3,9 +3,10 @@ import * as db from './db.js';
 import {
   agruparPorCategoria, jornadasDeOT, jornadaDeFecha, hoyISO, fechaAR, fondoPrioridad,
   avanceOT, categoriaOT, textoInicialOT, compararPiquetes, CATEGORIAS_OT, MAX_JORNADAS,
-  COLORES_DEFECTO, secuenciaDeNro, estadoMarca, MOTIVOS_PROCESO, privadoDe
+  COLORES_DEFECTO, secuenciaDeNro, estadoMarca, MOTIVOS_PROCESO, privadoDe,
+  textoPiquete, excluidoDeOT, codigoDeLinea
 } from './logica.js';
-import { VERSION_APP } from './config.js';
+import { VERSION_APP, NRO_OT_PDF } from './config.js';
 
 // ---------------- Estado y utilidades ----------------
 
@@ -314,9 +315,9 @@ function pintarOt() {
               const textoEstado = e === 'realizado' ? 'realizado el ' + fechaAR(m.fecha) : e === 'proceso' ? 'en proceso desde el ' + fechaAR(m.fecha)
                 : e === 'privado' ? `poda hecha por ${pv.empresa || 'una empresa privada'}, certificada el ${fechaAR(pv.fecha)}` : 'pendiente';
               return `<button class="celda ${esPrio ? 'celda-prio' : ''} ${e === 'proceso' ? 'celda-proceso' : ''} ${pv ? 'celda-privada' : ''}" style="--fp:${pv ? '#EEF1F0' : fondoPrioridad(it.prio)};--c:${esc(color || 'transparent')}" data-accion="abrir" data-rid="${esc(it.rid)}"
-                aria-label="${esc(it.pq)}, ${esc(it.txt)}, ${esPrio ? 'prioritario, ' : ''}${textoEstado}">
+                aria-label="${esc(textoPiquete(it.pq))}, ${esc(it.txt)}, ${esPrio ? 'prioritario, ' : ''}${textoEstado}">
                 ${esPrio ? `<span class="marca-prio">${icono.bandera}Prioritario</span>` : ''}
-                <strong>${esc(it.pq)}</strong><span>${esc(it.txt)}</span>
+                <strong>${esc(textoPiquete(it.pq))}</strong><span>${esc(it.txt)}</span>
                 ${e === 'proceso' ? '<span class="marca-proceso">En proceso</span>' : ''}
                 ${pv ? `<span class="marca-privada">Poda privada${pv.empresa ? ' · ' + esc(pv.empresa) : ''}</span>` : ''}
                 ${e === 'realizado' || pv ? '<i class="tachado" aria-hidden="true"></i>' : ''}
@@ -352,7 +353,7 @@ function hojaDetalle(ot, rid, { hoy, jHoy, cerrada }) {
     return `
     <div class="velo" data-accion="cerrar-hoja">
       <div class="hoja" role="dialog" aria-modal="true" aria-label="Marcar en proceso" data-accion="nada">
-        <div><span class="etiqueta">Marcar en proceso</span><strong class="hoja-pq">${esc(it.pq)}</strong></div>
+        <div><span class="etiqueta">Marcar en proceso</span><strong class="hoja-pq">${esc(textoPiquete(it.pq))}</strong></div>
         <p class="gris">¿Por qué no se pudo terminar?</p>
         <div class="chips-motivo">${MOTIVOS_PROCESO.map(mo => `<button class="pill" data-accion="motivo" data-valor="${esc(mo)}">${esc(mo)}</button>`).join('')}</div>
         <label>Motivo<textarea rows="2" data-motivo placeholder="Ej.: falta grúa alta para la copa del álamo">${esc(S.motivo || '')}</textarea></label>
@@ -366,7 +367,7 @@ function hojaDetalle(ot, rid, { hoy, jHoy, cerrada }) {
   <div class="velo" data-accion="cerrar-hoja">
     <div class="hoja" role="dialog" aria-modal="true" aria-label="Detalle del trabajo" data-accion="nada">
       <div class="fila-esp arriba">
-        <div><span class="etiqueta">${esc(it.fila || categoriaOT(it.categoria))} · piquete</span><strong class="hoja-pq">${esc(it.pq)}</strong></div>
+        <div><span class="etiqueta">${esc(it.fila || categoriaOT(it.categoria))} · piquete</span><strong class="hoja-pq">${esc(textoPiquete(it.pq))}</strong></div>
         <span class="prio" style="background:${fondoPrioridad(it.prio)}">${esc(it.prio && it.prio !== 'N/A' ? it.prio : 'Sin color')}</span>
       </div>
       ${esPrio ? `<p class="marca-prio grande">${icono.bandera}Trabajo prioritario</p>` : ''}
@@ -403,8 +404,8 @@ function zonaListaCierre(ot, hoy) {
   return `<ul class="lista">${deHoy.map(it => {
     const m = marcas[it.rid];
     return estadoMarca(m) === 'proceso'
-      ? `<li class="li-proceso"><strong>${esc(it.pq)}</strong><span><b>En proceso:</b> ${esc(m.motivo || '')}</span></li>`
-      : `<li><strong>${esc(it.pq)}</strong><span class="gris">${esc(it.txt)}</span></li>`;
+      ? `<li class="li-proceso"><strong>${esc(textoPiquete(it.pq))}</strong><span><b>En proceso:</b> ${esc(m.motivo || '')}</span></li>`
+      : `<li><strong>${esc(textoPiquete(it.pq))}</strong><span class="gris">${esc(it.txt)}</span></li>`;
   }).join('') || '<li class="gris">Todavía no marcaste trabajos hoy.</li>'}</ul>`;
 }
 
@@ -476,7 +477,7 @@ function supPrivada() {
       ${lista.length ? '' : '<div class="vacio"><strong>No hay nada para revisar</strong><span>Los reclamos que coinciden con seguridad con un vano certificado se tachan solos.</span></div>'}
       ${lista.map(r => `
         <section class="tarjeta revisar">
-          <div class="fila-esp arriba"><div><span class="etiqueta">${esc(r.lineaReclamo)}</span><strong class="tarjeta-titulo">Piquete ${esc(r.piquete)}</strong></div>
+          <div class="fila-esp arriba"><div><span class="etiqueta">${esc(r.lineaReclamo)}</span><strong class="tarjeta-titulo">Piquete ${esc(textoPiquete(r.piquete))}</strong></div>
             ${r.otNro ? `<span class="etiqueta-ot">En OT ${esc(r.otNro)}</span>` : ''}</div>
           ${r.observacion ? `<p class="hoja-texto chico">${esc(r.observacion)}</p>` : ''}
           <p class="gris chico">Relevado el ${esc(r.fechaReclamo)} · ${esc(r.motivo)}</p>
@@ -532,7 +533,9 @@ async function supEmitir(recargar = false) {
   if (!S.reclamos || recargar) {
     panelMain('<p class="nota">Leyendo reclamos pendientes…</p>');
     try {
-      S.reclamos = await db.reclamosPendientes();
+      const todos = await db.reclamosPendientes();
+      S.reclamos = todos.filter(r => !excluidoDeOT(r));
+      S.excluidos = todos.length - S.reclamos.length;
     } catch (e) {
       panelMain(`<p class="error">No se pudieron leer los reclamos: ${esc(e.message)}</p>`);
       return;
@@ -573,15 +576,16 @@ function pintarEmitir() {
         <div class="tabla-caja"><table class="tabla">
           <thead><tr><th><input type="checkbox" data-cambio="todos" aria-label="Incluir todos" ${lista.every(r => S.elegidos.has(r.id)) ? 'checked' : ''}></th><th>Piquete</th><th>Categoría</th><th>Prioridad</th><th title="La cuadrilla lo ve destacado para hacerlo primero">Prioritario</th><th>Observación del relevamiento</th><th>Texto en la OT</th></tr></thead>
           <tbody>${lista.map(r => `<tr>
-            <td><input type="checkbox" data-cambio="elegir" data-rid="${esc(r.id)}" aria-label="Incluir ${esc(r.piquete)}" ${S.elegidos.has(r.id) ? 'checked' : ''}></td>
-            <td class="mono negrita">${esc(r.piquete)}${r.otNro ? `<br><span class="etiqueta-ot">En OT ${esc(r.otNro)}</span>` : ''}${r.estado === 'En proceso' ? `<br><span class="etiqueta-proceso">En proceso</span>` : ''}</td>
+            <td><input type="checkbox" data-cambio="elegir" data-rid="${esc(r.id)}" aria-label="Incluir ${esc(textoPiquete(r.piquete))}" ${S.elegidos.has(r.id) ? 'checked' : ''}></td>
+            <td class="mono negrita">${esc(textoPiquete(r.piquete))}${r.otNro ? `<br><span class="etiqueta-ot">En OT ${esc(r.otNro)}</span>` : ''}${r.estado === 'En proceso' ? `<br><span class="etiqueta-proceso">En proceso</span>` : ''}</td>
             <td>${esc(r.categoria)}</td>
             <td><span class="prio" style="background:${fondoPrioridad(r.prioridad)}">${esc(r.prioridad || '-')}</span></td>
-            <td class="centrado"><input type="checkbox" class="check-prio" data-cambio="prio" data-rid="${esc(r.id)}" aria-label="Prioritario ${esc(r.piquete)}" ${S.prioritarios.has(r.id) ? 'checked' : ''}></td>
+            <td class="centrado"><input type="checkbox" class="check-prio" data-cambio="prio" data-rid="${esc(r.id)}" aria-label="Prioritario ${esc(textoPiquete(r.piquete))}" ${S.prioritarios.has(r.id) ? 'checked' : ''}></td>
             <td class="gris">${esc(r.observacion)}<br><span class="chico">${esc(r.fecha)} · ${esc(r.responsable)}</span></td>
-            <td><input class="texto-ot" data-cambio="texto" data-rid="${esc(r.id)}" value="${esc(r.textoOT || textoInicialOT(r.categoria, r.observacion))}" aria-label="Texto en la OT para ${esc(r.piquete)}"></td>
+            <td><input class="texto-ot" data-cambio="texto" data-rid="${esc(r.id)}" value="${esc(r.textoOT || textoInicialOT(r.categoria, r.observacion))}" aria-label="Texto en la OT para ${esc(textoPiquete(r.piquete))}"></td>
           </tr>`).join('')}</tbody></table></div>
-        <p class="nota">El texto editado se guarda solo. La observación original del relevamiento no se modifica.</p>`
+        <p class="nota">El texto editado se guarda solo. La observación original del relevamiento no se modifica.</p>
+        ${S.excluidos ? `<p class="nota">No se muestran ${S.excluidos} reclamos (de todas las líneas) cuya observación es solo una ubicación o "Sin observaciones": no son trabajos para la OT.</p>` : ''}`
         : '<p class="nota">No hay reclamos pendientes.</p>'}
       </section>
       <form class="tarjeta lateral" data-form="emitir">
@@ -589,8 +593,8 @@ function pintarEmitir() {
         <p class="fila-esp"><span class="gris">Trabajos incluidos</span><strong data-elegidos>${S.elegidos.size}</strong></p>
         <p class="fila-esp"><span class="gris">Prioritarios</span><strong data-prioritarios>${S.prioritarios.size}</strong></p>
         <label>Número de OT<input name="nro" required value="${esc(nro)}" class="mono"></label>
-        <label>Código de línea<input name="codigo" value="${esc(S.config.codigosLinea[S.lineaElegida] || '')}" placeholder="ej.: 66FP17" class="mono"></label>
-        <label>Cuadrilla<input name="cuadrilla" required list="lista-cuadrillas" placeholder="ej.: RAT TcT/TsT"></label>
+        <label>Código de línea<input name="codigo" value="${esc(codigoDeLinea(S.config, S.lineaElegida))}" placeholder="ej.: 66FP17" class="mono"></label>
+        <label>Cuadrilla <span class="gris chico">(a quién se asigna; no se imprime en la OT)</span><input name="cuadrilla" required list="lista-cuadrillas" placeholder="ej.: RAT TcT/TsT"></label>
         <datalist id="lista-cuadrillas">${cuadrillas.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
         <label>Encargado 1<input name="enc1"></label>
         <label>Encargado 2<input name="enc2"></label>
@@ -651,11 +655,13 @@ async function descargarPdf(id) {
   try {
     toast('Generando PDF…');
     const { generarPdfOT } = await import('./pdf.js');
-    const bytes = await generarPdfOT(ot, S.config.colores);
+    const bytes = await generarPdfOT(ot, S.config.colores, { codigoLinea: codigoDeLinea(S.config, ot.linea) });
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `OT ${ot.nro} - ${ot.linea}.pdf`.replace(/[\\/:*?"<>|]/g, '-');
+    // Mientras el número de OT no esté definido, el archivo se nombra por línea y fecha de emisión
+    a.download = (NRO_OT_PDF ? `OT ${ot.linea} - ${fechaAR(ot.fechaEmision).replace(/\//g, '-')}.pdf` : `OT ${ot.nro} - ${ot.linea}.pdf`)
+      .replace(/[\\/:*?"<>|]/g, '-');
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
@@ -788,6 +794,7 @@ app.addEventListener('change', async e => {
 
 let temporizadorObs = null;
 app.addEventListener('input', e => {
+  if (e.target.matches('[data-form=emitir] [name=codigo], [data-form=emitir] [name=nro]')) e.target.dataset.tocado = '1';
   if (e.target.matches('[data-motivo]')) { S.motivo = e.target.value; return; }
   const el = e.target.closest('[data-escribir="obs"]');
   if (!el || !S.ot) return;
@@ -905,6 +912,18 @@ db.alCambiarSesion(async user => {
     const cambioColores = JSON.stringify(cfg.colores) !== JSON.stringify(S.config.colores);
     S.config = cfg;
     const r = ruta();
+    // Si la pantalla de emisión se dibujó antes de que llegara la configuración, completa
+    // el código de línea y el número sugerido (solo si el supervisor no los tocó)
+    const form = document.querySelector('[data-form=emitir]');
+    if (form) {
+      const cod = form.querySelector('[name=codigo]');
+      if (cod && !cod.value && !cod.dataset.tocado) cod.value = codigoDeLinea(cfg, S.lineaElegida);
+      const nro = form.querySelector('[name=nro]');
+      if (nro && !nro.dataset.tocado) {
+        const p = db.proximoNroOT(cfg.ultimaSecuencia);
+        nro.value = p.nro; S.secuenciaSugerida = p.secuencia;
+      }
+    }
     if (cambioColores && S.ot && r.a === 'ot' && r.b === S.ot.id && r.c !== 'cierre') conservarScroll(pintarOt);
   });
   enrutar();

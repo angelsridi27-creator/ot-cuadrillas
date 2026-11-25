@@ -14,4 +14,8 @@ export const CORREO_ADMIN = 'angelsridi27@gmail.com';
 // Los operarios entran con un usuario corto; internamente se usa usuario@DOMINIO.
 export const DOMINIO_USUARIOS = 'cuadrillas.app';
 
-export const VERSION_APP = '1.3.0';
+// Número de OT que se imprime en el PDF mientras no esté definida la numeración oficial.
+// Cuando se defina, poner '' para que el PDF use el número de cada OT.
+export const NRO_OT_PDF = 'xxxx-xx-xx';
+
+export const VERSION_APP = '1.4.0';

@@ -10,7 +10,7 @@ import {
   writeBatch, serverTimestamp, deleteField
 } from 'firebase/firestore';
 import { firebaseConfig, CORREO_ADMIN, DOMINIO_USUARIOS } from './config.js';
-import { COLORES_DEFECTO, categoriaOT, textoInicialOT, compararPiquetes, hoyISO, horaLocal, fechaAR, formatoNroOT, ESTADO_PRIVADO } from './logica.js';
+import { COLORES_DEFECTO, categoriaOT, textoInicialOT, compararPiquetes, hoyISO, horaLocal, fechaAR, formatoNroOT, ESTADO_PRIVADO, textoPiquete } from './logica.js';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -61,9 +61,10 @@ export function escucharConfig(cb) {
     cb({
       colores: Array.isArray(d.colores) && d.colores.length ? d.colores : COLORES_DEFECTO,
       ultimaSecuencia: d.ultimaSecuencia || 0,
-      codigosLinea: d.codigosLinea || {}
+      codigosLinea: d.codigosLinea || {},
+      codigosOT: d.codigosOT || {}
     });
-  }, err => { console.warn(err); cb({ colores: COLORES_DEFECTO, ultimaSecuencia: 0, codigosLinea: {} }); });
+  }, err => { console.warn(err); cb({ colores: COLORES_DEFECTO, ultimaSecuencia: 0, codigosLinea: {}, codigosOT: {} }); });
 }
 
 export function guardarColores(colores) {
@@ -171,7 +172,7 @@ export function guardarTextoOT(rid, texto) {
 export async function emitirOt(datos, reclamos, perfil) {
   const items = reclamos.map(r => ({
     rid: r.id,
-    pq: r.piquete || '',
+    pq: textoPiquete(r.piquete),
     txt: r.textoOT || textoInicialOT(r.categoria, r.observacion),
     prio: r.prioridad || '',
     categoria: r.categoria || '',

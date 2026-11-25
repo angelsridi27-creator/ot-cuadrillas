@@ -39,6 +39,35 @@ export function textoInicialOT(cat, observacion) {
   return obs;
 }
 
+/** Piquete o vano como se muestra: letras en mayúscula ("6rt - 7rt" -> "6RT - 7RT"). */
+export function textoPiquete(pq) {
+  return String(pq ?? '').toUpperCase();
+}
+
+function sinAcentos(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Reclamos que no son trabajos y no van a la OT: los que solo marcan una ubicación
+ * ("Ubicación", "Ubicación salida desde MSU") y los "Sin observaciones".
+ */
+export function excluidoDeOT(r) {
+  const o = sinAcentos(r && r.observacion).toLowerCase().replace(/[.\s]+$/, '').trim();
+  return o === 'sin observaciones' || o === 'sin observacion' || /^ubicacion\b/.test(o);
+}
+
+/** Clave de una línea para buscar su código (sin acentos, espacios ni puntos). */
+export function claveLinea(nombre) {
+  return sinAcentos(nombre).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/** Código de la línea para la OT: el de la planilla OT Dinamica (hoja Detalles) o el último usado. */
+export function codigoDeLinea(config, linea) {
+  const c = config || {};
+  return (c.codigosOT || {})[claveLinea(linea)] || (c.codigosLinea || {})[linea] || '';
+}
+
 export function fondoPrioridad(prio) {
   return PRIORIDAD_FONDO[prio] || '#FFFFFF';
 }

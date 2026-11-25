@@ -1,8 +1,9 @@
 // Genera el PDF de la OT con el formato SG-R09 y el tachado diagonal por jornada.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca, privadoDe
+  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca, privadoDe, textoPiquete
 } from './logica.js';
+import { NRO_OT_PDF } from './config.js';
 
 const W = 612, H = 792, M = 30, CW = W - 2 * M;
 const NEGRO = rgb(0, 0, 0);
@@ -91,14 +92,24 @@ class Lienzo {
   }
 }
 
-export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
+/**
+ * opciones: { codigoLinea } — código a usar si la OT no tiene uno propio.
+ */
+export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {}) {
+  const nro = NRO_OT_PDF || ot.nro || '';
+  const codigo = ot.codigoLinea || opciones.codigoLinea || '';
   const doc = await PDFDocument.create();
-  doc.setTitle(`OT ${ot.nro} - ${ot.linea}`);
+  doc.setTitle(`OT ${nro} - ${ot.linea}`);
   doc.setCreator('App Cuadrillas OT');
   const fonts = {
     normal: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold)
   };
+  let logo = null;
+  try {
+    const r = await fetch(new URL('../icons/logo-epec.png', import.meta.url));
+    if (r.ok) logo = await doc.embedPng(new Uint8Array(await r.arrayBuffer()));
+  } catch (_) { /* sin logo: se escribe EPEC */ }
   const L = new Lienzo(doc, fonts);
   const jornadas = jornadasDeOT(ot.marcas, colores);
   const colorDeFecha = Object.fromEntries(jornadas.map(j => [j.fecha, j.color]));
@@ -111,11 +122,17 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
 
   // Fila 1
   L.rect(x0, y, c.logo, 42);
-  L.texto('EPEC', x0, y, c.logo, 42, { size: 24, bold: true, color: VERDE_EPEC });
+  if (logo) {
+    const k = Math.min((c.logo - 14) / logo.width, (42 - 8) / logo.height);
+    const w = logo.width * k, h = logo.height * k;
+    L.page.drawImage(logo, { x: x0 + (c.logo - w) / 2, y: H - y - (42 + h) / 2, width: w, height: h });
+  } else {
+    L.texto('EPEC', x0, y, c.logo, 42, { size: 24, bold: true, color: VERDE_EPEC });
+  }
   L.rect(x1, y, c.codLbl, 24); L.texto('CODIGO LINEA', x1, y, c.codLbl, 24, { size: 7.5 });
-  L.rect(x2, y, c.cod, 24); L.texto(`[ ${ot.codigoLinea || ''} ]`, x2, y, c.cod, 24, { size: 9 });
+  L.rect(x2, y, c.cod, 24); L.texto(`[ ${codigo} ]`, x2, y, c.cod, 24, { size: 9 });
   L.rect(x3, y, c.nroLbl, 24); L.texto('Nro. OT', x3, y, c.nroLbl, 24, { size: 7.5 });
-  L.rect(x4, y, c.nro, 24); L.texto(`[ ${ot.nro || ''} ]`, x4, y, c.nro, 24, { size: 8.5, bold: true });
+  L.rect(x4, y, c.nro, 24); L.texto(`[ ${nro} ]`, x4, y, c.nro, 24, { size: 8.5, bold: true });
   L.rect(x5, y, c.sg, 24); L.texto('SG-R09\nVersión: 01', x5, y, c.sg, 24, { size: 7, bold: true });
   y += 24;
   // Fila 2
@@ -138,12 +155,11 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
   L.texto('ENCARGADOS DEL\nTRABAJO (NOMBRES)', x0, y, c.logo, fh * 2, { size: 7.5 });
   L.rect(x1, y, izqW - c.logo, fh); L.texto(`1) ${enc[0] || ''}`, x1, y, izqW - c.logo, fh, { size: 7, alinear: 'izq' });
   L.rect(x1, y + fh, izqW - c.logo, fh); L.texto(`2) ${enc[1] || ''}`, x1, y + fh, izqW - c.logo, fh, { size: 7, alinear: 'izq' });
-  L.rect(x0, y + fh * 2, izqW, fh);
-  L.texto(`TRAMO/LÍNEA: ${ot.linea || ''}`, x0, y + fh * 2, izqW, fh, { size: 7.5, bold: true, alinear: 'izq' });
-  L.rect(x0, y + fh * 3, izqW, fh);
-  L.texto(ot.relevo ? `Relevó ${ot.relevo}` : '', x0, y + fh * 3, izqW, fh, { size: 7, alinear: 'izq' });
+  // TRAMO/LÍNEA ocupa dos renglones (los nombres de línea son largos); la cuadrilla no se imprime
+  L.rect(x0, y + fh * 2, izqW, fh * 2);
+  L.texto(`TRAMO/LÍNEA: ${ot.linea || ''}`, x0, y + fh * 2, izqW, fh * 2, { size: 8, bold: true, alinear: 'izq' });
   L.rect(x0, y + fh * 4, izqW, fh);
-  L.texto(ot.cuadrilla ? `Cuadrilla: ${ot.cuadrilla}` : '', x0, y + fh * 4, izqW, fh, { size: 7, alinear: 'izq' });
+  L.texto(ot.relevo ? `Relevó ${ot.relevo}` : '', x0, y + fh * 4, izqW, fh, { size: 7, alinear: 'izq' });
 
   for (let i = 0; i < MAX_JORNADAS; i++) {
     const yy = y + fh * i;
@@ -175,7 +191,7 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
   const saltoPagina = () => {
     L.nuevaPagina();
     y = M;
-    L.texto(`OT ${ot.nro} · ${ot.linea} (continuación)`, x0, y, CW, 12, { size: 7, alinear: 'izq' });
+    L.texto(`OT ${nro} · ${ot.linea} (continuación)`, x0, y, CW, 12, { size: 7, alinear: 'izq' });
     y += 14;
     barraTrabajos();
   };
@@ -202,7 +218,7 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
         const cx = x0 + labelW + k * colW;
         if (!it) { L.rect(cx, y, colW, altoFila); continue; }
         L.rect(cx, y, colW, celdaH);
-        L.texto(it.pq, cx, y + 1, colW, pqH, { size: 8.5, bold: true, min: 5 });
+        L.texto(textoPiquete(it.pq), cx, y + 1, colW, pqH, { size: 8.5, bold: true, min: 5 });
         L.rect(cx + 0.6, y + pqH + 1, colW - 1.2, celdaH - pqH - 1.6, { fill: hex(fondoPrioridad(it.prio)), borde: false });
         L.texto(it.txt, cx, y + pqH + 1, colW, celdaH - pqH - 1.6, { size: 7, min: 4.5, mayus: true });
         if (ot.prioritarios && ot.prioritarios[it.rid]) {
@@ -238,10 +254,10 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO) {
     .map(([f, t]) => `${fechaAR(f)}: ${t}`);
   const enProceso = (ot.items || [])
     .filter(it => estadoMarca((ot.marcas || {})[it.rid]) === 'proceso')
-    .map(it => `${it.pq}: EN PROCESO (${fechaAR(ot.marcas[it.rid].fecha)}) - ${ot.marcas[it.rid].motivo || ''}`);
+    .map(it => `${textoPiquete(it.pq)}: EN PROCESO (${fechaAR(ot.marcas[it.rid].fecha)}) - ${ot.marcas[it.rid].motivo || ''}`);
   const privados = (ot.items || [])
     .filter(it => estadoMarca((ot.marcas || {})[it.rid]) !== 'realizado' && privadoDe(ot, it.rid))
-    .map(it => { const p = privadoDe(ot, it.rid); return `${it.pq}: PODA REALIZADA POR ${p.empresa || 'EMPRESA PRIVADA'} - CERTIFICADA ${fechaAR(p.fecha)}`; });
+    .map(it => { const p = privadoDe(ot, it.rid); return `${textoPiquete(it.pq)}: PODA REALIZADA POR ${p.empresa || 'EMPRESA PRIVADA'} - CERTIFICADA ${fechaAR(p.fecha)}`; });
   const hayPrio = Object.keys(ot.prioritarios || {}).some(k => ot.prioritarios[k]);
   const referencias = (hayPrio || enProceso.length || privados.length)
     ? ['Referencias: ' + [hayPrio ? 'borde grueso con triángulo = trabajo prioritario' : '', enProceso.length ? 'media diagonal = en proceso' : '',
