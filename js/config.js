@@ -18,4 +18,4 @@ export const DOMINIO_USUARIOS = 'cuadrillas.app';
 // Cuando se defina, poner '' para que el PDF use el número de cada OT.
 export const NRO_OT_PDF = 'xxxx-xx-xx';
 
-export const VERSION_APP = '1.4.0';
+export const VERSION_APP = '1.5.0';

@@ -161,6 +161,13 @@ export async function reclamosPendientes() {
   return s.docs.map(conId);
 }
 
+/** Lee varios reclamos por id (para completar datos de OT viejas). */
+export async function leerReclamos(ids) {
+  const unicos = [...new Set((ids || []).filter(Boolean))].slice(0, 60);
+  const snaps = await Promise.all(unicos.map(id => getDoc(doc(db, 'reclamos', id)).catch(() => null)));
+  return snaps.filter(s => s && s.exists()).map(s => ({ id: s.id, ...s.data() }));
+}
+
 export function guardarTextoOT(rid, texto) {
   return updateDoc(doc(db, 'reclamos', rid), { textoOT: texto, actualizado: serverTimestamp() });
 }
@@ -190,6 +197,9 @@ export async function emitirOt(datos, reclamos, perfil) {
     hora: horaLocal(),
     encargados: datos.encargados || [],
     relevo: datos.relevo || '',
+    // relevamientos que figuran en "Relev.:" (se agregan los de reclamos nuevos mientras la OT está activa)
+    relevamientos: datos.relevo ? [{ texto: datos.relevo, fecha: datos.relevCorte || '' }] : [],
+    relevCorte: datos.relevCorte || '',
     cuadrilla: datos.cuadrilla,
     observacion: datos.observacion || '',
     estado: 'abierta',

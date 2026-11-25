@@ -4,7 +4,7 @@ import {
   agruparPorCategoria, jornadasDeOT, jornadaDeFecha, hoyISO, fechaAR, fondoPrioridad,
   avanceOT, categoriaOT, textoInicialOT, compararPiquetes, CATEGORIAS_OT, MAX_JORNADAS,
   COLORES_DEFECTO, secuenciaDeNro, estadoMarca, MOTIVOS_PROCESO, privadoDe,
-  textoPiquete, excluidoDeOT, codigoDeLinea
+  textoPiquete, excluidoDeOT, codigoDeLinea, textoRelevamiento, resumenPrivados, fechaRelevISO
 } from './logica.js';
 import { VERSION_APP, NRO_OT_PDF } from './config.js';
 
@@ -174,16 +174,23 @@ function encabezado({ titulo, sub = '', volver = '', extra = '' }) {
 function chipsJornadas(ot) {
   const js = jornadasDeOT(ot.marcas, S.config.colores);
   const cuenta = {};
-  Object.values(ot.marcas || {}).forEach(m => { if (m) cuenta[m.fecha] = (cuenta[m.fecha] || 0) + 1; });
-  return js.map(j => `<span class="chip-j"><span class="cuadro" style="background:${esc(j.color)}"></span>${fechaAR(j.fecha).slice(0, 5)} · ${cuenta[j.fecha] || 0}</span>`).join('');
+  Object.values(ot.marcas || {}).forEach(m => { const j = m && jornadaDeFecha(js, m.fecha); if (j) cuenta[j.n] = (cuenta[j.n] || 0) + 1; });
+  return js.map(j => `<span class="chip-j"><span class="cuadro" style="background:${esc(j.color)}"></span>${esc(j.texto)} · ${cuenta[j.n] || 0}</span>`).join('');
+}
+
+/** Aviso al supervisor si la poda privada de la OT tiene más de una empresa o más de un mes. */
+function avisoPrivados(ot) {
+  const r = resumenPrivados(ot);
+  if (!r.conflicto) return '';
+  return `<div class="aviso aviso-rojo" role="alert"><div><strong>Poda privada de más de una empresa o mes en esta OT</strong><span>Empresas: ${esc(r.empresas.join(', '))} · Meses: ${esc(r.meses.join(', '))}. En el PDF sale una sola leyenda con todos; revisalo.</span></div></div>`;
 }
 
 function barraAvance(ot) {
   const { total } = avanceOT(ot);
   const js = jornadasDeOT(ot.marcas, S.config.colores);
   const cuenta = {};
-  Object.values(ot.marcas || {}).forEach(m => { if (m && estadoMarca(m) === 'realizado') cuenta[m.fecha] = (cuenta[m.fecha] || 0) + 1; });
-  return `<div class="avance" aria-hidden="true">${js.map(j => `<span style="width:${total ? (cuenta[j.fecha] || 0) / total * 100 : 0}%;background:${esc(j.color)}"></span>`).join('')}</div>`;
+  Object.values(ot.marcas || {}).forEach(m => { const j = m && estadoMarca(m) === 'realizado' && jornadaDeFecha(js, m.fecha); if (j) cuenta[j.n] = (cuenta[j.n] || 0) + 1; });
+  return `<div class="avance" aria-hidden="true">${js.map(j => `<span style="width:${total ? (cuenta[j.n] || 0) / total * 100 : 0}%;background:${esc(j.color)}"></span>`).join('')}</div>`;
 }
 
 function vistaMisOts() {
@@ -291,9 +298,10 @@ function pintarOt() {
       ${cerrada
         ? '<div class="aviso aviso-gris"><div><strong>OT cerrada</strong><span>Solo se puede consultar.</span></div></div>'
         : jHoy && !jHoy.excedida
-          ? `<span class="cuadro grande" style="background:${esc(jHoy.color)}"></span><div><strong>Jornada ${jHoy.n} · hoy ${fechaAR(hoy)}</strong><span class="gris">Lo que marques hoy se tacha en este color</span></div>`
-          : `<div class="aviso aviso-rojo"><div><strong>La OT ya tiene ${MAX_JORNADAS} fechas de ejecución</strong><span>No entran más fechas en el formulario. Pedile al supervisor una OT nueva.</span></div></div>`}
+          ? `<span class="cuadro grande" style="background:${esc(jHoy.color)}"></span><div><strong>Período ${jHoy.n} · ${esc(jHoy.texto)}</strong><span class="gris">Lo que marques hoy se tacha en este color${jHoy.fechas.length > 1 ? ' (sigue el período de los días anteriores)' : ''}</span></div>`
+          : `<div class="aviso aviso-rojo"><div><strong>La OT ya completó sus ${MAX_JORNADAS} períodos de trabajo</strong><span>No entran más fechas en el formulario. Pedile al supervisor una OT nueva.</span></div></div>`}
     </div>
+    ${esSup() ? avisoPrivados(ot) : ''}
     ${av.prioPendientes && !cerrada ? `<button class="aviso aviso-prio" data-accion="filtro" data-valor="prio">${icono.bandera}<div><strong>${av.prioPendientes} trabajo${av.prioPendientes > 1 ? 's' : ''} prioritario${av.prioPendientes > 1 ? 's' : ''} sin terminar</strong><span>Hacelos primero. Tocá para verlos.</span></div></button>` : ''}
     <div data-avisos>${avisoConexion()}</div>
     <nav class="filtros" aria-label="Filtro">
@@ -432,7 +440,7 @@ function pintarCierre() {
     <main class="scroll contenido">
       <section class="tarjeta">
         <div class="fila"><span class="cuadro grande" style="background:${esc(jHoy ? jHoy.color : '#999')}"></span>
-          <div><strong class="tarjeta-titulo">Jornada ${jHoy ? jHoy.n : '-'} · ${fechaAR(hoy)}</strong><span class="gris">${nHoy} trabajo${nHoy === 1 ? '' : 's'} realizado${nHoy === 1 ? '' : 's'} hoy</span></div></div>
+          <div><strong class="tarjeta-titulo">Jornada del ${fechaAR(hoy)} · período ${jHoy ? jHoy.n : '-'}</strong><span class="gris">${nHoy} trabajo${nHoy === 1 ? '' : 's'} realizado${nHoy === 1 ? '' : 's'} hoy</span></div></div>
         <div data-zona="lista">${zonaListaCierre(ot, hoy)}</div>
         <label>Observaciones de la jornada (opcional)
           <textarea name="obs" rows="3" data-escribir="obs" placeholder="Ej.: 220RT-224 sin acceso por camino anegado">${esc((ot.obsJornadas || {})[hoy] || '')}</textarea>
@@ -502,7 +510,7 @@ function supOts() {
     const fila = ot => {
       const a = avanceOT(ot);
       return `<tr>
-        <td class="mono negrita">${esc(ot.nro)}</td>
+        <td class="mono negrita">${esc(ot.nro)}${resumenPrivados(ot).conflicto ? '<br><span class="etiqueta-proceso" title="Poda privada de más de una empresa o mes">⚠ Poda privada</span>' : ''}</td>
         <td>${esc(ot.linea)}</td>
         <td>${esc(ot.cuadrilla)}</td>
         <td>${fechaAR(ot.fechaEmision)}</td>
@@ -561,8 +569,7 @@ function pintarEmitir() {
   const cuadrillas = [...new Set((S.usuarios || []).map(u => u.cuadrilla).filter(Boolean))];
   const { nro, secuencia } = db.proximoNroOT(S.config.ultimaSecuencia);
   S.secuenciaSugerida = secuencia;
-  const ultimo = lista.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
-  const relevo = ultimo ? `${ultimo.responsable || ''} (${ultimo.fecha || ''})` : '';
+  const relevo = textoRelevamiento(lista.filter(r => S.elegidos.has(r.id)));
 
   panelMain(`
     <div class="panel-cab"><div><h1>Emitir orden de trabajo</h1><p class="gris">Elegí la línea, revisá los reclamos pendientes y ajustá el texto que va a la OT.</p></div>
@@ -598,7 +605,7 @@ function pintarEmitir() {
         <datalist id="lista-cuadrillas">${cuadrillas.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
         <label>Encargado 1<input name="enc1"></label>
         <label>Encargado 2<input name="enc2"></label>
-        <label>Relevó<input name="relevo" value="${esc(relevo)}"></label>
+        <label>Relevador (fecha del relevamiento)<input name="relevo" value="${esc(relevo)}" placeholder="ej.: Juarez P. (20/10/2026)"></label>
         <label>Observación / pendientes<textarea name="obs" rows="2"></textarea></label>
         <button class="btn btn-primario btn-grande" type="submit">Emitir y enviar a la cuadrilla</button>
       </form>
@@ -637,10 +644,10 @@ async function supUsuarios() {
 function supColores() {
   const cs = S.config.colores;
   panelMain(`
-    <div class="panel-cab"><h1>Colores por jornada</h1></div>
+    <div class="panel-cab"><h1>Colores por período</h1></div>
     <form class="tarjeta angosta" data-form="colores">
-      <p class="gris">Cada fecha de ejecución de una OT se tacha con un color: la primera jornada con el 1, la segunda con el 2, y así hasta 5.</p>
-      ${[0, 1, 2, 3, 4].map(i => `<label class="fila-color">Jornada ${i + 1}<input type="color" name="c${i}" value="${esc(cs[i] || COLORES_DEFECTO[i])}"></label>`).join('')}
+      <p class="gris">Cada período de trabajo de una OT se tacha con un color: el primero con el 1, el segundo con el 2, y así hasta 5. Los días con menos de 3 días libres entre sí son el mismo período. La poda hecha por empresas privadas se tacha siempre en negro, así que no conviene usar negro acá.</p>
+      ${[0, 1, 2, 3, 4].map(i => `<label class="fila-color">Período ${i + 1}<input type="color" name="c${i}" value="${esc(cs[i] || COLORES_DEFECTO[i])}"></label>`).join('')}
       <button class="btn btn-primario" type="submit">Guardar colores</button>
       <p class="nota">Cambiar un color modifica también el tachado de las OT ya emitidas.</p>
     </form>`);
@@ -655,7 +662,10 @@ async function descargarPdf(id) {
   try {
     toast('Generando PDF…');
     const { generarPdfOT } = await import('./pdf.js');
-    const bytes = await generarPdfOT(ot, S.config.colores, { codigoLinea: codigoDeLinea(S.config, ot.linea) });
+    // OT viejas sin relevador: se toma de sus reclamos
+    let relevo = ot.relevo || ((ot.relevamientos || [])[0] || {}).texto || '';
+    if (!relevo) { try { relevo = textoRelevamiento(await db.leerReclamos((ot.items || []).map(i => i.rid))); } catch (_) { /* sin dato */ } }
+    const bytes = await generarPdfOT(ot, S.config.colores, { codigoLinea: codigoDeLinea(S.config, ot.linea), relevo });
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     const a = document.createElement('a');
     a.href = url;
@@ -843,6 +853,8 @@ app.addEventListener('submit', async e => {
         nro: d.nro.trim(), secuencia: sec, linea: S.lineaElegida, codigoLinea: d.codigo.trim(),
         cuadrilla: d.cuadrilla.trim(), encargados: [d.enc1.trim(), d.enc2.trim()],
         relevo: d.relevo.trim(), observacion: d.obs.trim(),
+        // fecha del relevamiento más nuevo incluido: los reclamos de relevamientos posteriores se suman solos a esta OT
+        relevCorte: elegidos.map(r => fechaRelevISO(r.fecha)).filter(Boolean).sort().pop() || '',
         prioritarios: [...S.prioritarios].filter(rid => S.elegidos.has(rid))
       }, elegidos, S.perfil);
       toast(`OT ${d.nro} emitida`, 'ok');

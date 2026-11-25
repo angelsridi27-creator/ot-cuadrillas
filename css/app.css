@@ -218,7 +218,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--verde); }
 /* Poda hecha por una empresa privada (certificada desde la app de poda) */
 .celda-privada { border-style: dashed; }
 .celda-privada strong, .celda-privada > span:not(.marca-privada) { color: #5F6B66; }
-.celda .marca-privada { font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; background: #5F6B66; padding: 2px 8px; border-radius: 999px; }
+.celda .marca-privada { font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; background: #1F2421; padding: 2px 8px; border-radius: 999px; }
 .aviso-privado { background: #EEF1F0; border-color: #A9B4AF; color: #33403A; margin: 0; }
 .revisar .candidatos { display: flex; flex-direction: column; gap: 8px; }
 .revisar .candidatos .btn { justify-content: flex-start; text-align: left; height: auto; min-height: 44px; padding: 8px 14px; }

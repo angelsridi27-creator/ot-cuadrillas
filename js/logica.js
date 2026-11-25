@@ -57,6 +57,25 @@ export function excluidoDeOT(r) {
   return o === 'sin observaciones' || o === 'sin observacion' || /^ubicacion\b/.test(o);
 }
 
+/** Fecha del relevamiento ("20/10/2026", "9/6/2026") -> 'AAAA-MM-DD' ('' si no se entiende). */
+export function fechaRelevISO(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m) return '';
+  const y = m[3].length === 2 ? '20' + m[3] : m[3];
+  return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
+/** Relevador y fecha del relevamiento más reciente de los reclamos: "Juarez P. (20/10/2026)". */
+export function textoRelevamiento(reclamos) {
+  const conFecha = (reclamos || []).filter(r => r && (r.responsable || r.fecha))
+    .map(r => ({ r, iso: fechaRelevISO(r.fecha) }))
+    .sort((a, b) => b.iso.localeCompare(a.iso));
+  const u = conFecha[0];
+  if (!u) return '';
+  const fecha = u.iso ? fechaAR(u.iso) : String(u.r.fecha || '');
+  return `${String(u.r.responsable || '').trim()}${fecha ? ` (${fecha})` : ''}`.trim();
+}
+
 /** Clave de una línea para buscar su código (sin acentos, espacios ni puntos). */
 export function claveLinea(nombre) {
   return sinAcentos(nombre).toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -103,29 +122,97 @@ export function fechaAR(iso) {
   return `${d}/${m}/${y}`;
 }
 
+/** Días libres entre dos trabajos para que sigan siendo el mismo período (menos de 3 días libres). */
+export const DIAS_MISMO_PERIODO = 3;
+
+function diasEntre(a, b) {
+  return Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400000);
+}
+
 /**
- * Jornadas de una OT, deducidas de las fechas de las marcas.
- * Cada fecha distinta es una jornada, numeradas en orden cronológico.
- * Así dos teléfonos sin señal nunca se "pisan" el número de jornada.
+ * Períodos de trabajo de una OT, deducidos de las fechas de las marcas.
+ * Dos fechas con menos de 3 días libres entre sí (diferencia de hasta 3 días) son el mismo período:
+ * 24 y 25 -> "24-25/11/2026"; 27 y 30 -> "27 y 30/10/2026". Cada período tiene un color y ocupa uno
+ * de los 5 casilleros de "Fecha Ejecución" del formulario. Se calcula de las fechas (no de un contador),
+ * así dos teléfonos sin señal nunca se pisan.
+ * Devuelve [{ n, fecha (la primera), fechas[], texto, color, excedida }].
  */
 export function jornadasDeOT(marcas, colores = COLORES_DEFECTO, fechaExtra = null) {
-  const fechas = new Set();
+  const set = new Set();
   for (const m of Object.values(marcas || {})) {
     if (!m) continue;
-    if (m.fecha) fechas.add(m.fecha);
-    if (m.proceso && m.proceso.fecha) fechas.add(m.proceso.fecha); // un "en proceso" anterior conserva su jornada
+    if (m.fecha) set.add(m.fecha);
+    if (m.proceso && m.proceso.fecha) set.add(m.proceso.fecha); // un "en proceso" anterior conserva su período
   }
-  if (fechaExtra) fechas.add(fechaExtra);
-  return [...fechas].sort().map((fecha, i) => ({
+  if (fechaExtra) set.add(fechaExtra);
+  const fechas = [...set].sort();
+  const periodos = [];
+  for (const f of fechas) {
+    const ult = periodos[periodos.length - 1];
+    if (ult && diasEntre(ult.fechas[ult.fechas.length - 1], f) <= DIAS_MISMO_PERIODO) ult.fechas.push(f);
+    else periodos.push({ fechas: [f] });
+  }
+  return periodos.map((p, i) => ({
     n: i + 1,
-    fecha,
+    fecha: p.fechas[0],
+    fechas: p.fechas,
+    texto: textoPeriodo(p.fechas),
     color: colores[i] || colores[colores.length - 1] || '#000000',
     excedida: i >= MAX_JORNADAS
   }));
 }
 
+/** Período que contiene una fecha, o null. */
 export function jornadaDeFecha(jornadas, fecha) {
-  return jornadas.find(j => j.fecha === fecha) || null;
+  return jornadas.find(j => (j.fechas || [j.fecha]).includes(fecha)) || null;
+}
+
+/**
+ * Texto de un período: "24/11/2026", "24-26/11/2026", "27 y 30/10/2026", "24-25 y 28/11/2026",
+ * "30/11-02/12/2026".
+ */
+export function textoPeriodo(fechas) {
+  const fs = [...new Set(fechas || [])].sort();
+  if (!fs.length) return '';
+  const tramos = [];
+  for (const f of fs) {
+    const t = tramos[tramos.length - 1];
+    if (t && diasEntre(t[1], f) === 1) t[1] = f; else tramos.push([f, f]);
+  }
+  const p = iso => { const [y, m, d] = iso.split('-'); return { y, m, d }; };
+  const mismoMes = fs.every(f => f.slice(0, 7) === fs[0].slice(0, 7));
+  const mismoAnio = fs.every(f => f.slice(0, 4) === fs[0].slice(0, 4));
+  const corto = iso => { const x = p(iso); return mismoMes ? x.d : mismoAnio ? `${x.d}/${x.m}` : `${x.d}/${x.m}/${x.y}`; };
+  const partes = tramos.map(([a, b]) => a === b ? corto(a) : `${corto(a)}-${corto(b)}`);
+  const unidas = partes.length > 1 ? partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1] : partes[0];
+  const u = p(fs[fs.length - 1]);
+  return unidas + (mismoMes ? `/${u.m}/${u.y}` : mismoAnio ? `/${u.y}` : '');
+}
+
+const MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+
+/**
+ * Poda privada de la OT: leyenda para el PDF ("PODA EMPRESA PRIVADA - EFUS MAYO 2026") y aviso si
+ * hay más de una empresa o más de un mes de certificación (no debería pasar en una misma OT).
+ */
+export function resumenPrivados(ot) {
+  const lista = Object.entries((ot && ot.privados) || {}).map(([, p]) => p).filter(Boolean);
+  const empresas = [...new Set(lista.map(p => String(p.empresa || '').trim().toUpperCase()).filter(Boolean))];
+  const meses = [...new Set(lista.map(p => String(p.fecha || '').slice(0, 7)).filter(Boolean))].sort();
+  const textoMes = ym => { const [y, m] = ym.split('-'); return `${MESES[Number(m) - 1] || ''} ${y}`.trim(); };
+  return {
+    hay: lista.length > 0,
+    empresas, meses: meses.map(textoMes),
+    leyenda: lista.length ? `PODA EMPRESA PRIVADA - ${empresas.join(' / ') || 'SIN NOMBRE'} ${meses.map(textoMes).join(' / ')}`.trim() : '',
+    conflicto: empresas.length > 1 || meses.length > 1
+  };
+}
+
+/** Relevamientos de la OT para el renglón "Relev.:" (los textos, en orden). */
+export function relevamientosDeOT(ot, relevoExtra = '') {
+  const lista = Array.isArray(ot && ot.relevamientos) ? ot.relevamientos.map(r => (r && r.texto) || '').filter(Boolean) : [];
+  if (!lista.length) { const r = (ot && ot.relevo) || relevoExtra; if (r) lista.push(r); }
+  return lista;
 }
 
 /** Agrupa los ítems de la OT por fila de categoría, en el orden del formulario. */

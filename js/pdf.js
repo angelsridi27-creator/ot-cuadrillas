@@ -1,16 +1,18 @@
 // Genera el PDF de la OT con el formato SG-R09 y el tachado diagonal por jornada.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca, privadoDe, textoPiquete
+  agruparPorCategoria, jornadasDeOT, fechaAR, fondoPrioridad, COLORES_DEFECTO, MAX_JORNADAS, estadoMarca, privadoDe, textoPiquete,
+  resumenPrivados, relevamientosDeOT
 } from './logica.js';
 import { NRO_OT_PDF } from './config.js';
 
 const W = 612, H = 792, M = 30, CW = W - 2 * M;
 const NEGRO = rgb(0, 0, 0);
-const GRIS_BARRA = rgb(0.74, 0.74, 0.74);
+const GRIS_BARRA = rgb(0.6, 0.6, 0.6);
 const GRIS_LABEL = rgb(0.85, 0.85, 0.85);
 const VERDE_EPEC = rgb(0, 0.44, 0.29);
-const GRIS_PRIVADO = rgb(0.45, 0.48, 0.47);
+const NEGRO_PRIVADO = rgb(0, 0, 0); // poda hecha por empresa privada: distinto de los colores de las fechas
+const PUNTEADA = [3.2, 2.4];
 
 function hex(c) {
   const h = String(c || '#000000').replace('#', '');
@@ -45,8 +47,8 @@ class Lienzo {
       borderWidth: borde ? grosor : 0
     });
   }
-  linea(x1, y1, x2, y2, color = NEGRO, grosor = 0.6) {
-    this.page.drawLine({ start: { x: x1, y: H - y1 }, end: { x: x2, y: H - y2 }, thickness: grosor, color });
+  linea(x1, y1, x2, y2, color = NEGRO, grosor = 0.6, punteada = null) {
+    this.page.drawLine({ start: { x: x1, y: H - y1 }, end: { x: x2, y: H - y2 }, thickness: grosor, color, ...(punteada ? { dashArray: punteada } : {}) });
   }
   envolver(texto, font, size, ancho) {
     const lineas = [];
@@ -71,8 +73,8 @@ class Lienzo {
     return lineas;
   }
   /** Texto dentro de una caja; achica la letra hasta que entre. */
-  texto(t, x, y, w, h, { size = 8, min = 4.5, bold = false, alinear = 'centro', vertical = 'centro', pad = 2, color = NEGRO, mayus = false } = {}) {
-    const font = bold ? this.f.bold : this.f.normal;
+  texto(t, x, y, w, h, { size = 8, min = 4.5, bold = false, italic = false, alinear = 'centro', vertical = 'centro', pad = 2, color = NEGRO, mayus = false } = {}) {
+    const font = bold && italic ? this.f.boldItalic : bold ? this.f.bold : this.f.normal;
     let s = size, lineas;
     const contenido = mayus ? String(t ?? '').toUpperCase() : t;
     for (;;) {
@@ -103,7 +105,8 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   doc.setCreator('App Cuadrillas OT');
   const fonts = {
     normal: await doc.embedFont(StandardFonts.Helvetica),
-    bold: await doc.embedFont(StandardFonts.HelveticaBold)
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+    boldItalic: await doc.embedFont(StandardFonts.HelveticaBoldOblique)
   };
   let logo = null;
   try {
@@ -112,7 +115,9 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   } catch (_) { /* sin logo: se escribe EPEC */ }
   const L = new Lienzo(doc, fonts);
   const jornadas = jornadasDeOT(ot.marcas, colores);
-  const colorDeFecha = Object.fromEntries(jornadas.map(j => [j.fecha, j.color]));
+  // cada fecha -> color de su período
+  const colorDeFecha = {};
+  jornadas.forEach(j => j.fechas.forEach(f => { colorDeFecha[f] = j.color; }));
 
   // ---------- Encabezado ----------
   let y = M;
@@ -137,7 +142,7 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   y += 24;
   // Fila 2
   L.rect(x1, y, c.codLbl + c.cod + c.nroLbl, 18);
-  L.texto('DEPARTAMENTO REDES DE ALTA TENSIÓN', x1, y, c.codLbl + c.cod + c.nroLbl, 18, { size: 8, bold: true });
+  L.texto('DEPARTAMENTO REDES DE ALTA TENSIÓN', x1, y, c.codLbl + c.cod + c.nroLbl, 18, { size: 8, bold: true, italic: true });
   L.rect(der, y, c.nro + c.sg, 18);
   L.texto(`Fecha de emisión: ${fechaAR(ot.fechaEmision)}`, der, y, c.nro + c.sg, 18, { size: 6.5, alinear: 'izq' });
   y += 18;
@@ -148,31 +153,37 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   L.rect(der, y, c.nro + c.sg, 16); L.texto(`Hora: ${ot.hora || ''}`, der, y, c.nro + c.sg, 16, { size: 6.5, alinear: 'izq' });
   y += 16;
 
-  // Filas 4 a 8: datos a la izquierda y las 5 fechas de ejecución a la derecha
-  const fh = 15, izqW = c.logo + c.codLbl + c.cod + c.nroLbl;
+  // Filas 4 a 6: encargados y tramo/línea a la izquierda; a la derecha, los 5 casilleros de
+  // "Fecha Ejecución" (uno por período de trabajo). Fila 7: relevadores, a todo lo ancho (SG-R09).
+  const fh = 15, izqW = c.logo + c.codLbl + c.cod + c.nroLbl, FILAS_FECHA = 3;
   const enc = ot.encargados || [];
   L.rect(x0, y, c.logo, fh * 2);
   L.texto('ENCARGADOS DEL\nTRABAJO (NOMBRES)', x0, y, c.logo, fh * 2, { size: 7.5 });
   L.rect(x1, y, izqW - c.logo, fh); L.texto(`1) ${enc[0] || ''}`, x1, y, izqW - c.logo, fh, { size: 7, alinear: 'izq' });
   L.rect(x1, y + fh, izqW - c.logo, fh); L.texto(`2) ${enc[1] || ''}`, x1, y + fh, izqW - c.logo, fh, { size: 7, alinear: 'izq' });
-  // TRAMO/LÍNEA ocupa dos renglones (los nombres de línea son largos); la cuadrilla no se imprime
-  L.rect(x0, y + fh * 2, izqW, fh * 2);
-  L.texto(`TRAMO/LÍNEA: ${ot.linea || ''}`, x0, y + fh * 2, izqW, fh * 2, { size: 8, bold: true, alinear: 'izq' });
-  L.rect(x0, y + fh * 4, izqW, fh);
-  L.texto(ot.relevo ? `Relevó ${ot.relevo}` : '', x0, y + fh * 4, izqW, fh, { size: 7, alinear: 'izq' });
+  L.rect(x0, y + fh * 2, izqW, fh);
+  L.texto(`TRAMO/LÍNEA: ${ot.linea || ''}`, x0, y + fh * 2, izqW, fh, { size: 7.5, alinear: 'izq' });
 
-  for (let i = 0; i < MAX_JORNADAS; i++) {
-    const yy = y + fh * i;
-    L.rect(der, yy, c.nro, fh);
-    if (i === 0) L.texto('Fecha Ejecución:', der, yy, c.nro, fh, { size: 6.5, alinear: 'izq' });
-    L.rect(x5, yy, c.sg, fh);
-    const j = jornadas[i];
-    if (j) {
-      L.texto(fechaAR(j.fecha), x5, yy, c.sg, fh - 2, { size: 7.5 });
-      L.linea(x5 + 4, yy + fh - 2.5, x5 + c.sg - 4, yy + fh - 2.5, hex(j.color), 2.2);
-    }
+  for (let i = 0; i < FILAS_FECHA; i++) {
+    L.rect(der, y + fh * i, c.nro, fh);
+    L.rect(x5, y + fh * i, c.sg, fh);
   }
-  y += fh * MAX_JORNADAS;
+  L.texto('Fecha Ejecución:', der, y, c.nro, fh, { size: 6.5, alinear: 'izq' });
+  // casilleros: 1 al lado del rótulo, 2 y 3 en el segundo renglón, 4 y 5 en el tercero
+  const casilleros = [[x5, 0, c.sg], [der, 1, c.nro], [x5, 1, c.sg], [der, 2, c.nro], [x5, 2, c.sg]];
+  casilleros.forEach(([cx, fila, w], i) => {
+    const j = jornadas[i];
+    if (!j) return;
+    const yy = y + fh * fila;
+    L.texto(j.texto, cx, yy, w, fh - 2, { size: 7.5, min: 4.5 });
+    L.linea(cx + 3, yy + fh - 2.5, cx + w - 3, yy + fh - 2.5, hex(j.color), 2.2);
+  });
+  y += fh * FILAS_FECHA;
+  const relevos = relevamientosDeOT(ot, opciones.relevo)
+    .map((r, i) => i === 0 ? String(r).replace(/^relev(ó|o|\.)?:?\s*/i, '') : String(r));
+  L.rect(x0, y, CW, fh);
+  L.texto(`Relev.: ${relevos.join('   ·   ')}`, x0, y, CW, fh, { size: 7, alinear: 'izq' });
+  y += fh;
 
   // ---------- Tabla de trabajos ----------
   const labelW = 120, ncol = 7, colW = (CW - labelW) / ncol, celdaH = 46, pqH = 12;
@@ -197,14 +208,25 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   };
 
   barraTrabajos();
+  const privados = resumenPrivados({ privados: Object.fromEntries((ot.items || [])
+    .filter(it => privadoDe(ot, it.rid) && estadoMarca((ot.marcas || {})[it.rid]) !== 'realizado')
+    .map(it => [it.rid, privadoDe(ot, it.rid)])) });
 
   for (const grupo of agruparPorCategoria(ot.items)) {
     const filas = Math.max(1, Math.ceil(grupo.items.length / ncol));
     let inicioSegmento = y, filasSegmento = 0;
+    let primerSegmento = true;
     const cerrarSegmento = () => {
       if (!filasSegmento) return;
-      L.rect(x0, inicioSegmento, labelW, y - inicioSegmento);
-      L.texto(grupo.nombre, x0, inicioSegmento, labelW, y - inicioSegmento, { size: 8, bold: true });
+      const alto = y - inicioSegmento;
+      L.rect(x0, inicioSegmento, labelW, alto);
+      L.texto(grupo.nombre, x0, inicioSegmento, labelW, alto, { size: 8, bold: true });
+      // leyenda de la poda privada, arriba del recuadro PODA, en el mismo color del tachado
+      if (grupo.nombre === 'PODA' && primerSegmento && privados.hay) {
+        L.texto(privados.leyenda, x0, inicioSegmento, labelW, Math.min(30, alto / 2 - 4),
+          { size: 7, min: 4.5, bold: true, alinear: 'izq', vertical: 'arriba', color: NEGRO_PRIVADO });
+      }
+      primerSegmento = false;
     };
     const altoFila = grupo.items.length ? celdaH : 28;
     for (let f = 0; f < filas; f++) {
@@ -229,16 +251,13 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
         const marca = ot.marcas && ot.marcas[it.rid];
         const priv = estadoMarca(marca) !== 'realizado' ? privadoDe(ot, it.rid) : null;
         if (priv) {
-          // poda hecha por una empresa privada: diagonal gris
-          L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, GRIS_PRIVADO, 2.4);
+          // poda hecha por una empresa privada: diagonal negra
+          L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, NEGRO_PRIVADO, 2.4);
         } else if (marca && colorDeFecha[marca.fecha]) {
           const col = hex(colorDeFecha[marca.fecha]);
-          if (estadoMarca(marca) === 'proceso') {
-            // en proceso: media diagonal (desde la esquina inferior izquierda hasta el centro)
-            L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW / 2, y + celdaH / 2, col, 2.4);
-          } else {
-            L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, col, 2.4);
-          }
+          // en proceso: diagonal punteada del color del período; realizado: diagonal llena
+          L.linea(cx + 1.5, y + celdaH - 1.5, cx + colW - 1.5, y + 1.5, col, 2.6,
+            estadoMarca(marca) === 'proceso' ? PUNTEADA : null);
         }
       }
       y += altoFila;
@@ -248,34 +267,54 @@ export async function generarPdfOT(ot, colores = COLORES_DEFECTO, opciones = {})
   }
 
   // ---------- Observaciones y firmas ----------
-  const obsJ = Object.entries(ot.obsJornadas || {})
+  // Renglones: observación de la OT, observaciones de cada jornada y, para los trabajos en proceso,
+  // un trazo punteado horizontal del color del período seguido del motivo que escribió el operario.
+  const renglones = [];
+  String(ot.observacion || '').split('\n').filter(t => t.trim()).forEach(t => renglones.push({ t }));
+  Object.entries(ot.obsJornadas || {})
     .filter(([, t]) => t && String(t).trim())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([f, t]) => `${fechaAR(f)}: ${t}`);
-  const enProceso = (ot.items || [])
-    .filter(it => estadoMarca((ot.marcas || {})[it.rid]) === 'proceso')
-    .map(it => `${textoPiquete(it.pq)}: EN PROCESO (${fechaAR(ot.marcas[it.rid].fecha)}) - ${ot.marcas[it.rid].motivo || ''}`);
-  const privados = (ot.items || [])
-    .filter(it => estadoMarca((ot.marcas || {})[it.rid]) !== 'realizado' && privadoDe(ot, it.rid))
-    .map(it => { const p = privadoDe(ot, it.rid); return `${textoPiquete(it.pq)}: PODA REALIZADA POR ${p.empresa || 'EMPRESA PRIVADA'} - CERTIFICADA ${fechaAR(p.fecha)}`; });
-  const hayPrio = Object.keys(ot.prioritarios || {}).some(k => ot.prioritarios[k]);
-  const referencias = (hayPrio || enProceso.length || privados.length)
-    ? ['Referencias: ' + [hayPrio ? 'borde grueso con triángulo = trabajo prioritario' : '', enProceso.length ? 'media diagonal = en proceso' : '',
-        privados.length ? 'diagonal gris = poda hecha por empresa privada' : ''].filter(Boolean).join(' · ')]
-    : [];
-  const textoObs = [ot.observacion || '', ...enProceso, ...privados, ...obsJ, ...referencias].filter(Boolean).join('\n');
-  const bloqueFinal = 12 + 44 + 12 + 36;
+    .forEach(([f, t]) => renglones.push({ t: `${fechaAR(f)}: ${t}` }));
+  const vistos = new Set();
+  (ot.items || []).forEach(it => {
+    const m = (ot.marcas || {})[it.rid];
+    if (estadoMarca(m) !== 'proceso' || privadoDe(ot, it.rid)) return;
+    const color = colorDeFecha[m.fecha] || '#000000';
+    const motivo = String(m.motivo || '').trim() || `${textoPiquete(it.pq)} en proceso`;
+    const clave = color + '|' + motivo.toLowerCase();
+    if (vistos.has(clave)) return; // mismo motivo en el mismo período: un solo renglón
+    vistos.add(clave);
+    renglones.push({ t: motivo, muestra: color });
+  });
+  if (Object.keys(ot.prioritarios || {}).some(k => ot.prioritarios[k])) {
+    renglones.push({ t: 'Referencia: borde grueso con triángulo = trabajo prioritario', chico: true });
+  }
+
+  const obsW = CW - labelW, tam = 7, alto = tam * 1.25, sangria = 30;
+  const lineasObs = [];
+  renglones.forEach(r => {
+    const w = obsW - 6 - (r.muestra ? sangria : 0);
+    L.envolver(r.t, fonts.normal, r.chico ? 6 : tam, w).forEach((ln, i) => lineasObs.push({ ln, muestra: i === 0 ? r.muestra : null, sangria: !!r.muestra, chico: r.chico }));
+  });
+  const obsH = Math.max(44, lineasObs.length * alto + 8);
+  const bloqueFinal = 12 + obsH + 12 + 36;
   if (y + bloqueFinal > limite) { L.nuevaPagina(); y = M; }
 
   L.rect(x0, y, labelW, 12); L.texto('OBSERVACIÓN', x0, y, labelW, 12, { size: 6.5, bold: true });
-  L.rect(x0 + labelW, y, CW - labelW, 12);
-  L.texto('PENDIENTES (MOTIVO y NRO. APOYO)', x0 + labelW, y, CW - labelW, 12, { size: 6, alinear: 'izq' });
+  L.rect(x0 + labelW, y, obsW, 12);
+  L.texto('PENDIENTES (MOTIVO y NRO. APOYO)', x0 + labelW, y, obsW, 12, { size: 6, alinear: 'izq' });
   y += 12;
-  L.rect(x0, y, labelW, 44);
-  L.texto('N° de piquete: detalle lo observado', x0, y, labelW, 44, { size: 5, vertical: 'abajo', alinear: 'izq' });
-  L.rect(x0 + labelW, y, CW - labelW, 44);
-  L.texto(textoObs, x0 + labelW, y, CW - labelW, 44, { size: 7, min: 4.5, alinear: 'izq', vertical: 'arriba' });
-  y += 44;
+  L.rect(x0, y, labelW, obsH);
+  L.texto('N° de piquete: detalle lo observado', x0, y, labelW, obsH, { size: 5, vertical: 'abajo', alinear: 'izq' });
+  L.rect(x0 + labelW, y, obsW, obsH);
+  let yo = y + 4;
+  const xo = x0 + labelW + 3;
+  lineasObs.forEach(o => {
+    if (o.muestra) L.linea(xo, yo + alto / 2, xo + sangria - 6, yo + alto / 2, hex(o.muestra), 2.6, PUNTEADA);
+    L.page.drawText(o.ln, { x: xo + (o.sangria ? sangria : 0), y: H - yo - tam * 0.95, size: o.chico ? 6 : tam, font: fonts.normal, color: NEGRO });
+    yo += alto;
+  });
+  y += obsH;
   L.rect(x0, y, CW, 12, { fill: GRIS_BARRA });
   L.texto('RESPONSABLES DEL MANTENIMIENTO', x0, y, CW, 12, { size: 7, bold: true });
   y += 12;
